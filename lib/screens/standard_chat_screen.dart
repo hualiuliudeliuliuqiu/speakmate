@@ -1,14 +1,20 @@
+import 'dart:async';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 
 import '../config/theme.dart';
 import '../models/conversation.dart';
 import '../models/message.dart';
 import '../models/scenario.dart';
+import '../services/audio_service.dart';
 import '../services/conversation_service.dart';
 import '../services/gemini_text_service.dart';
 import '../services/storage_service.dart';
 import '../services/tts_service.dart';
+import '../widgets/audio_visualizer.dart';
 import '../widgets/transcript_bubble.dart';
 
 class StandardChatScreen extends StatefulWidget {
@@ -23,6 +29,7 @@ class StandardChatScreen extends StatefulWidget {
 class _StandardChatScreenState extends State<StandardChatScreen> {
   final GeminiTextService _gemini = GeminiTextService();
   final TtsService _tts = TtsService();
+  final AudioService _audio = AudioService();
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _textController = TextEditingController();
   final FocusNode _textFocusNode = FocusNode();
@@ -30,8 +37,14 @@ class _StandardChatScreenState extends State<StandardChatScreen> {
   late Conversation _conversation;
   final List<Message> _messages = [];
   bool _isLoading = false;
+  bool _isRecording = false;
+  double _audioLevel = 0.0;
   String? _errorMessage;
   bool _isReady = false;
+
+  // Collect PCM data during recording
+  final List<int> _recordingBuffer = [];
+  StreamSubscription<double>? _audioLevelSub;
 
   @override
   void initState() {
@@ -171,6 +184,125 @@ class _StandardChatScreenState extends State<StandardChatScreen> {
     }
   }
 
+  // ─── Voice input ───
+
+  Future<void> _toggleRecording() async {
+    if (_isRecording) {
+      await _stopRecordingAndSend();
+    } else {
+      await _startRecording();
+    }
+  }
+
+  Future<void> _startRecording() async {
+    if (_isLoading || !_isReady) return;
+
+    _textFocusNode.unfocus();
+
+    final status = await Permission.microphone.request();
+    if (!status.isGranted) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Microphone permission is required'),
+            backgroundColor: AppTheme.danger,
+          ),
+        );
+      }
+      return;
+    }
+
+    // Stop any TTS playback
+    await _tts.stop();
+
+    _recordingBuffer.clear();
+    _audio.onAudioChunk = (chunk) {
+      _recordingBuffer.addAll(chunk);
+    };
+
+    _audioLevelSub?.cancel();
+    _audioLevelSub = _audio.onAudioLevel.listen((level) {
+      if (mounted) setState(() => _audioLevel = level);
+    });
+
+    try {
+      await _audio.startRecording();
+      setState(() => _isRecording = true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to start recording: $e'),
+            backgroundColor: AppTheme.danger,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _stopRecordingAndSend() async {
+    await _audio.stopRecording();
+    _audioLevelSub?.cancel();
+
+    final pcmData = Uint8List.fromList(_recordingBuffer);
+    _recordingBuffer.clear();
+
+    setState(() {
+      _isRecording = false;
+      _audioLevel = 0.0;
+    });
+
+    if (pcmData.isEmpty) return;
+
+    // Calculate duration for display
+    final durationSec = pcmData.length / (16000 * 2); // 16kHz, 16-bit
+    final durStr = durationSec >= 60
+        ? '${(durationSec / 60).floor()}:${(durationSec % 60).floor().toString().padLeft(2, '0')}'
+        : '${durationSec.toStringAsFixed(0)}s';
+
+    final convService = context.read<ConversationService>();
+
+    // Add user voice message
+    final userMsg = Message(
+      role: MessageRole.user,
+      text: '🎤 $durStr',
+      isVoice: true,
+    );
+    setState(() {
+      _messages.add(userMsg);
+      _isLoading = true;
+      _errorMessage = null;
+    });
+    _scrollToBottom();
+    await convService.addMessage(_conversation.id, userMsg);
+
+    try {
+      // Send audio to Gemini — it understands speech directly
+      final responseText = await _gemini.sendAudioMessage(pcmData);
+
+      if (!mounted) return;
+
+      final assistantMsg =
+          Message(role: MessageRole.assistant, text: responseText);
+      setState(() {
+        _messages.add(assistantMsg);
+        _isLoading = false;
+      });
+      _scrollToBottom();
+
+      await convService.addMessage(_conversation.id, assistantMsg);
+
+      // Speak the response
+      _tts.speak(responseText, messageId: assistantMsg.id);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Failed to get response: $e';
+      });
+    }
+  }
+
   // ─── New chat ───
 
   void _startNewChat() {
@@ -205,6 +337,8 @@ class _StandardChatScreenState extends State<StandardChatScreen> {
   void dispose() {
     _tts.dispose();
     _gemini.dispose();
+    _audio.dispose();
+    _audioLevelSub?.cancel();
     _scrollController.dispose();
     _textController.dispose();
     _textFocusNode.dispose();
@@ -249,6 +383,18 @@ class _StandardChatScreenState extends State<StandardChatScreen> {
                     },
                   ),
           ),
+
+          // Recording visualizer
+          if (_isRecording)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: AppTheme.spacingSm),
+              child: AudioVisualizer(
+                level: _audioLevel,
+                isActive: true,
+                size: 100,
+                color: const Color(0xFF6366F1),
+              ),
+            ),
 
           // Loading indicator
           if (_isLoading)
@@ -492,10 +638,11 @@ class _StandardChatScreenState extends State<StandardChatScreen> {
                 maxLines: null,
                 textInputAction: TextInputAction.send,
                 onSubmitted: (_) => _sendTextMessage(),
-                enabled: !_isLoading,
+                enabled: !_isLoading && !_isRecording,
                 decoration: InputDecoration(
-                  hintText:
-                      _isLoading ? 'Waiting for response...' : 'Type in English...',
+                  hintText: _isRecording
+                      ? 'Recording...'
+                      : (_isLoading ? 'Waiting for response...' : 'Type in English...'),
                   hintStyle: const TextStyle(
                       color: AppTheme.textMuted, fontSize: 15),
                   border: InputBorder.none,
@@ -520,19 +667,37 @@ class _StandardChatScreenState extends State<StandardChatScreen> {
   }
 
   Widget _buildMicButton() {
-    return Tooltip(
-      message: 'Voice input coming soon — use text for now',
-      child: Container(
-        width: 48,
-        height: 48,
-        decoration: const BoxDecoration(
-          shape: BoxShape.circle,
-          color: AppTheme.backgroundAlt,
-        ),
-        child: const Icon(
-          Icons.mic_rounded,
-          color: AppTheme.textMuted,
-          size: 24,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: _toggleRecording,
+        borderRadius: BorderRadius.circular(24),
+        splashColor: const Color(0xFF6366F1).withValues(alpha: 0.2),
+        highlightColor: const Color(0xFF6366F1).withValues(alpha: 0.1),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          width: 48,
+          height: 48,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: _isRecording
+                ? const Color(0xFF6366F1)
+                : (_isReady ? AppTheme.backgroundAlt : AppTheme.backgroundAlt),
+            boxShadow: _isRecording
+                ? [
+                    BoxShadow(
+                      color: const Color(0xFF6366F1).withValues(alpha: 0.3),
+                      blurRadius: 12,
+                      offset: const Offset(0, 3),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Icon(
+            _isRecording ? Icons.stop_rounded : Icons.mic_rounded,
+            color: _isRecording ? Colors.white : (_isReady ? const Color(0xFF6366F1) : AppTheme.textMuted),
+            size: 24,
+          ),
         ),
       ),
     );
