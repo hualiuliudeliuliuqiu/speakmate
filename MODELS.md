@@ -57,11 +57,11 @@
 |------|------|
 | `gemini-embedding-001` | 文本嵌入，可用于语义搜索 |
 
-## 💡 关于字幕功能
+## 💡 关于转写功能
 
-**Q: response_modalities 只能设 ["AUDIO"]，那怎么显示字幕？**
+### 双向转写
 
-A: 需要在 setup message 中显式启用 `output_audio_transcription`：
+在 setup message 中同时启用两个转写：
 
 ```json
 {
@@ -72,20 +72,35 @@ A: 需要在 setup message 中显式启用 `output_audio_transcription`：
       "speech_config": { ... }
     },
     "output_audio_transcription": {},
+    "input_audio_transcription": {},
     "system_instruction": { ... }
   }
 }
 ```
 
-**⚠️ 重要区分**：
-- `serverContent.modelTurn.parts[].text` — 这是模型的**思考/规划文本**（类似 CoT），不是语音转写！内容可能类似 "Acknowledge and Redirect: I've acknowledged the greeting..."
-- `serverContent.outputTranscription.text` — 这才是**真正的语音转写**，和 AI 说出的内容一致
+- **`output_audio_transcription`** → AI 语音字幕（`serverContent.outputTranscription.text`）
+- **`input_audio_transcription`** → 用户语音转写（`serverContent.inputTranscription.text`）
+  - ⚠️ AI Studio API 将 `inputTranscription` 放在 `serverContent` 内部（非顶层）
+  - ⚠️ 转写语言自动推断，无法手动指定
+  - ⚠️ 流式到达，第一个 chunk 可能是空格，需 `trim()` 过滤
 
-SpeakMate 只使用 `outputTranscription` 显示字幕，忽略 `modelTurn` 中的思考文本。
+**⚠️ 重要区分**：
+- `serverContent.modelTurn.parts[].text` — 这是模型的**思考/规划文本**（类似 CoT），不是语音转写！
+- `serverContent.outputTranscription.text` — 这才是**真正的语音转写**
 
 ### 音频播放策略
 
-SpeakMate 采用**完整播放**策略：收集整个 model turn 的所有音频数据，turn 结束后合成完整 WAV 一次性播放。这样避免了流式播放的音频截断问题。音频文件同时保存到本地供重播。
+SpeakMate 采用**实时播放 + 完整保存**策略：
+- 实时播放：`mp_audio_stream` 接收 PCM 数据即时播放（低延迟）
+- 完整保存：turn 结束后将全部 PCM 合成 WAV 保存供重播
+
+### Standard 模式的语音输入
+
+Standard 模式通过 Gemini REST API 的 multimodal 能力处理语音：
+- 录音 PCM → WAV → base64 → `inlineData`（`audio/wav`）
+- 并行发送：主回复请求 + 独立转写请求（`Future.wait`）
+- 转写完成后更新用户消息气泡
+- 发送后将 history 中的 audio 数据替换为文本摘要节省 tokens
 
 ## ⚠️ 地域限制
 
