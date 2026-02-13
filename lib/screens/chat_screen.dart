@@ -50,6 +50,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _textController.addListener(() {
+      setState(() {}); // rebuild to update send button color
+    });
     _loadConversation();
     _initConnection();
   }
@@ -63,6 +66,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     // Restore previous messages
     if (_conversation.messages.isNotEmpty) {
       _messages.addAll(_conversation.messages);
+      // Preload audio cache for assistant messages
+      final assistantIds = _messages
+          .where((m) => m.role == MessageRole.assistant)
+          .map((m) => m.id)
+          .toList();
+      _audio.preloadAudioCache(assistantIds).then((_) {
+        if (mounted) setState(() {});
+      });
+      // Scroll to bottom after frame
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
     }
   }
 
@@ -159,6 +172,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
       final speaking = _gemini.isModelSpeaking;
       if (_isModelSpeaking && !speaking) {
+        // Get the message ID for audio replay
+        String? msgId;
+        if (_messages.isNotEmpty &&
+            _messages.last.role == MessageRole.assistant) {
+          msgId = _messages.last.id;
+        }
         setState(() {
           _isModelSpeaking = false;
           if (_messages.isNotEmpty &&
@@ -168,7 +187,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           }
           _currentAssistantText = '';
         });
-        _audio.flushRemainingPlayback();
+        _audio.flushRemainingPlayback(messageId: msgId).then((_) {
+          if (mounted) setState(() {}); // refresh to show replay button
+        });
       }
       if (!_isModelSpeaking && speaking) {
         setState(() {
@@ -359,8 +380,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    // When keyboard appears, scroll to bottom
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    if (bottomInset > 0) {
+      _scrollToBottom();
+    }
+
     return Scaffold(
       backgroundColor: AppTheme.background,
+      resizeToAvoidBottomInset: true,
       appBar: _buildAppBar(),
       body: Column(
         children: [
@@ -376,7 +404,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     padding: const EdgeInsets.symmetric(vertical: AppTheme.spacingMd),
                     itemCount: _messages.length,
                     itemBuilder: (context, index) =>
-                        TranscriptBubble(message: _messages[index]),
+                        TranscriptBubble(
+                          message: _messages[index],
+                          audioService: _audio,
+                        ),
                   ),
           ),
 

@@ -161,6 +161,7 @@ class GeminiLiveService {
             },
           },
         },
+        'output_audio_transcription': {},
         'system_instruction': {
           'parts': [
             {'text': _systemPrompt},
@@ -227,12 +228,19 @@ class GeminiLiveService {
                 }
               }
 
-              // Transcript
-              if (partMap.containsKey('text')) {
-                final text = partMap['text'] as String;
-                _transcriptController.add(text);
-              }
+              // Ignore inline text from modelTurn — it's thinking/planning text,
+              // not the actual speech transcription.
             }
+          }
+        }
+
+        // Output audio transcription (the real speech-to-text)
+        if (serverContent.containsKey('outputTranscription')) {
+          final transcription =
+              serverContent['outputTranscription'] as Map<String, dynamic>;
+          final text = transcription['text'] as String?;
+          if (text != null && text.isNotEmpty) {
+            _transcriptController.add(text);
           }
         }
 

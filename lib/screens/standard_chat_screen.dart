@@ -36,6 +36,9 @@ class _StandardChatScreenState extends State<StandardChatScreen> {
   @override
   void initState() {
     super.initState();
+    _textController.addListener(() {
+      setState(() {}); // rebuild to update send button color
+    });
     _initServices();
   }
 
@@ -205,8 +208,14 @@ class _StandardChatScreenState extends State<StandardChatScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+    if (bottomInset > 0) {
+      _scrollToBottom();
+    }
+
     return Scaffold(
       backgroundColor: AppTheme.background,
+      resizeToAvoidBottomInset: true,
       appBar: _buildAppBar(),
       body: Column(
         children: [
@@ -224,13 +233,12 @@ class _StandardChatScreenState extends State<StandardChatScreen> {
                     itemCount: _messages.length,
                     itemBuilder: (context, index) {
                       final msg = _messages[index];
-                      if (msg.role == MessageRole.assistant) {
-                        return GestureDetector(
-                          onTap: () => _replayTts(msg.text),
-                          child: TranscriptBubble(message: msg),
-                        );
-                      }
-                      return TranscriptBubble(message: msg);
+                      return TranscriptBubble(
+                        message: msg,
+                        onTtsReplay: msg.role == MessageRole.assistant
+                            ? () => _replayTts(msg.text)
+                            : null,
+                      );
                     },
                   ),
           ),
@@ -524,6 +532,7 @@ class _StandardChatScreenState extends State<StandardChatScreen> {
   }
 
   Widget _buildSendButton() {
+    final hasText = _textController.text.trim().isNotEmpty;
     return GestureDetector(
       onTap: _sendTextMessage,
       child: AnimatedContainer(
@@ -534,7 +543,7 @@ class _StandardChatScreenState extends State<StandardChatScreen> {
           shape: BoxShape.circle,
           color: _isLoading
               ? AppTheme.backgroundAlt
-              : const Color(0xFF6366F1), // Indigo to match mode card
+              : (hasText ? const Color(0xFF6366F1) : AppTheme.backgroundAlt),
         ),
         child: _isLoading
             ? const SizedBox(
@@ -545,9 +554,9 @@ class _StandardChatScreenState extends State<StandardChatScreen> {
                   color: AppTheme.textMuted,
                 ),
               )
-            : const Icon(
+            : Icon(
                 Icons.send_rounded,
-                color: Colors.white,
+                color: hasText ? Colors.white : AppTheme.textMuted,
                 size: 20,
               ),
       ),

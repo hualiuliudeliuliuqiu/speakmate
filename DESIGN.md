@@ -157,65 +157,80 @@ DO NOT:
 
 ## 技术实现计划
 
-### Phase 1: 基础框架（1-2 天）
-- [ ] Flutter 项目初始化
-- [ ] 基本 UI 骨架（对话界面、录音按钮）
-- [ ] 音频录制模块（PCM 16kHz）
-- [ ] 音频播放模块（PCM 24kHz）
+### Phase 1: 基础框架 ✅
+- [x] Flutter 项目初始化
+- [x] 基本 UI 骨架（对话界面、录音按钮）
+- [x] 音频录制模块（PCM 16kHz）
+- [x] 音频播放模块（PCM 24kHz → WAV）
 
-### Phase 2: Gemini 对接（2-3 天）
-- [ ] WebSocket 连接管理器
-- [ ] 音频流发送/接收
-- [ ] 会话建立（setup message + system prompt）
-- [ ] 音频转写接收和显示
-- [ ] 打断检测处理
+### Phase 2: Gemini 对接 ✅
+- [x] WebSocket 连接管理器（含代理支持）
+- [x] 音频流发送/接收
+- [x] 会话建立（setup message + system prompt）
+- [x] 音频转写接收和显示（output_audio_transcription）
+- [x] 打断检测处理
+- [x] Standard Chat 模式（REST API + 系统 TTS）
 
-### Phase 3: 口语教练功能（1-2 天）
-- [ ] 场景对话模板
-- [ ] System Prompt 管理
-- [ ] 发音反馈高亮显示
-- [ ] 对话记录存储（SQLite）
+### Phase 3: 口语教练功能 ✅
+- [x] 场景对话模板
+- [x] System Prompt 管理（Native Audio / Standard 两套）
+- [x] 对话记录存储（SharedPreferences + JSON）
+- [x] 对话历史持久化 + 上下文恢复
 
-### Phase 4: 体验优化（1-2 天）
-- [ ] 连接状态指示
-- [ ] 自动重连
-- [ ] 音频波形可视化
-- [ ] 设置页面（API Key 配置、语音语速偏好）
+### Phase 4: 体验优化 ✅
+- [x] 连接状态指示
+- [x] 音频波形可视化
+- [x] 设置页面（API Key、代理、语音、头像）
+- [x] 音频重播功能（持久化 WAV 文件）
+- [x] 自定义头像（AI + 用户）
+- [x] 文本可复制
+- [x] 键盘弹出自动滚动
+- [x] AppTheme 设计系统（浅色主题）
+
+### Phase 5: 待做
+- [ ] 实机反馈迭代优化
+- [ ] Standard 模式加语音输入
+- [ ] 发音评估报告（Tool Use）
+- [ ] 学习计划/进度追踪
 
 ## 目录结构
 
 ```
 speakmate/
 ├── lib/
-│   ├── main.dart
-│   ├── app.dart
+│   ├── main.dart                    # 入口，.env 加载，服务初始化
+│   ├── app.dart                     # MaterialApp 配置
 │   ├── config/
-│   │   └── constants.dart          # API 地址、音频参数等
+│   │   ├── constants.dart           # API 地址、音频参数、System Prompt
+│   │   └── theme.dart               # AppTheme 设计系统
 │   ├── models/
-│   │   ├── conversation.dart       # 对话数据模型
-│   │   ├── message.dart            # 消息模型（文字+音频）
-│   │   └── scenario.dart           # 场景模板模型
+│   │   ├── conversation.dart        # 对话数据模型
+│   │   ├── message.dart             # 消息模型（带 UUID）
+│   │   └── scenario.dart            # 场景模板模型
 │   ├── services/
-│   │   ├── gemini_live_service.dart # WebSocket + 音频流核心
-│   │   ├── audio_service.dart      # 录音+播放
-│   │   └── storage_service.dart    # 本地存储
+│   │   ├── gemini_live_service.dart  # WebSocket + Native Audio 核心
+│   │   ├── gemini_text_service.dart  # REST API (Standard Chat 模式)
+│   │   ├── audio_service.dart       # 录音 + PCM→WAV 播放 + 重播
+│   │   ├── tts_service.dart         # 系统 TTS (Standard Chat 模式)
+│   │   ├── conversation_service.dart # 对话持久化 (SharedPreferences)
+│   │   └── storage_service.dart     # 设置存储 (API key, proxy, avatars)
 │   ├── screens/
-│   │   ├── home_screen.dart        # 主页（场景列表）
-│   │   ├── chat_screen.dart        # 对话界面
-│   │   ├── history_screen.dart     # 历史记录
-│   │   └── settings_screen.dart    # 设置
+│   │   ├── home_screen.dart         # 主页（双模式选择）
+│   │   ├── chat_screen.dart         # Native Audio 对话界面
+│   │   ├── standard_chat_screen.dart # Standard Chat 对话界面
+│   │   └── settings_screen.dart     # 设置（API key, proxy, voice, avatars）
 │   ├── widgets/
-│   │   ├── audio_visualizer.dart   # 音频波形
-│   │   ├── transcript_bubble.dart  # 转写气泡
-│   │   └── scenario_card.dart      # 场景卡片
+│   │   ├── audio_visualizer.dart    # 录音波形 + AI Speaking 指示器
+│   │   └── transcript_bubble.dart   # 消息气泡（支持复制、重播动画）
 │   └── prompts/
-│       ├── base_prompt.dart        # 基础教练 prompt
-│       └── scenarios.dart          # 场景 prompt 集合
+│       └── scenarios.dart           # 场景 prompt 集合
 ├── assets/
-│   └── scenarios/                  # 场景图标等
-├── test/
+│   └── images/
+│       └── ai_avatar.jpeg           # 默认 AI 头像
+├── .env                             # API key（gitignored）
 ├── pubspec.yaml
 ├── DESIGN.md
+├── MODELS.md
 └── README.md
 ```
 
@@ -225,13 +240,16 @@ speakmate/
 dependencies:
   flutter:
     sdk: flutter
-  web_socket_channel: ^3.0.0    # WebSocket 通信
-  record: ^5.0.0                # 麦克风录音（PCM 输出）
-  audioplayers: ^6.0.0          # 音频播放
-  sqflite: ^2.3.0               # 本地数据库
-  path_provider: ^2.1.0         # 文件路径
-  provider: ^6.1.0              # 状态管理
-  shared_preferences: ^2.2.0    # 配置存储
-  permission_handler: ^11.0.0   # 权限管理
-  uuid: ^4.0.0                  # 唯一标识
+  web_socket_channel: ^3.0.3    # WebSocket 通信 (Live API)
+  record: ^5.1.2                # 麦克风录音（PCM 输出）
+  audioplayers: ^6.1.0          # WAV 音频播放 + 重播
+  path_provider: ^2.1.5         # 文件路径（音频持久化）
+  provider: ^6.1.2              # 状态管理
+  shared_preferences: ^2.3.3    # 配置存储
+  permission_handler: ^11.3.1   # 权限管理
+  uuid: ^4.5.1                  # 消息唯一标识
+  flutter_dotenv: ^5.2.1        # .env 文件加载
+  http: ^1.2.0                  # REST API 调用 (Standard 模式)
+  flutter_tts: ^4.2.0           # 系统 TTS (Standard 模式)
+  image_picker: ^1.1.2          # 头像选择
 ```

@@ -1,4 +1,8 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 
 import '../config/constants.dart';
@@ -276,6 +280,48 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ),
 
+          const SizedBox(height: AppTheme.spacingLg),
+
+          // ─── Avatar Section ───
+          _buildSectionHeader('Avatars', Icons.face_rounded),
+          const SizedBox(height: AppTheme.spacingSm),
+          _buildCard(
+            child: Column(
+              children: [
+                _buildAvatarRow(
+                  label: 'AI Avatar',
+                  currentPath: context.read<StorageService>().aiAvatarPath,
+                  defaultWidget: ClipRRect(
+                    borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+                    child: Image.asset(
+                      'assets/images/ai_avatar.jpeg',
+                      width: 48,
+                      height: 48,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                  onPick: () => _pickAvatar(isAi: true),
+                ),
+                const Divider(height: 24),
+                _buildAvatarRow(
+                  label: 'My Avatar',
+                  currentPath: context.read<StorageService>().userAvatarPath,
+                  defaultWidget: Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: AppTheme.primarySurface,
+                      borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+                    ),
+                    alignment: Alignment.center,
+                    child: Icon(Icons.person_rounded, size: 24, color: AppTheme.primary),
+                  ),
+                  onPick: () => _pickAvatar(isAi: false),
+                ),
+              ],
+            ),
+          ),
+
           const SizedBox(height: AppTheme.spacingXl),
 
           // ─── About ───
@@ -332,5 +378,84 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       child: child,
     );
+  }
+
+  Widget _buildAvatarRow({
+    required String label,
+    required String? currentPath,
+    required Widget defaultWidget,
+    required VoidCallback onPick,
+  }) {
+    final hasCustom = currentPath != null && File(currentPath).existsSync();
+
+    return Row(
+      children: [
+        // Avatar preview
+        hasCustom
+            ? ClipRRect(
+                borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+                child: Image.file(
+                  File(currentPath),
+                  width: 48,
+                  height: 48,
+                  fit: BoxFit.cover,
+                  // Bust image cache by using the file's modified time
+                  cacheWidth: 96,
+                ),
+              )
+            : defaultWidget,
+        const SizedBox(width: AppTheme.spacingMd),
+        // Label
+        Expanded(
+          child: Text(label, style: AppTheme.headingSm.copyWith(fontSize: 14)),
+        ),
+        // Pick button
+        TextButton.icon(
+          onPressed: onPick,
+          icon: const Icon(Icons.image_rounded, size: 16),
+          label: const Text('Change'),
+          style: TextButton.styleFrom(
+            foregroundColor: AppTheme.primary,
+            textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _pickAvatar({required bool isAi}) async {
+    final picker = ImagePicker();
+    final image = await picker.pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 256,
+      maxHeight: 256,
+      imageQuality: 85,
+    );
+    if (image == null) return;
+
+    // Copy with unique name to bust image cache
+    final appDir = await getApplicationDocumentsDirectory();
+    final ts = DateTime.now().millisecondsSinceEpoch;
+    final fileName = isAi ? 'ai_avatar_$ts.jpg' : 'user_avatar_$ts.jpg';
+    final savedFile = await File(image.path).copy('${appDir.path}/$fileName');
+
+    final storage = context.read<StorageService>();
+
+    // Delete old file
+    final oldPath = isAi ? storage.aiAvatarPath : storage.userAvatarPath;
+    if (oldPath != null) {
+      try { await File(oldPath).delete(); } catch (_) {}
+    }
+
+    if (isAi) {
+      await storage.setAiAvatarPath(savedFile.path);
+    } else {
+      await storage.setUserAvatarPath(savedFile.path);
+    }
+
+    // Clear Flutter image cache
+    imageCache.clear();
+    imageCache.clearLiveImages();
+    setState(() {});
   }
 }

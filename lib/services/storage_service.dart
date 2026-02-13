@@ -25,7 +25,7 @@ class StorageService {
   Future<void> setProxyPort(int value) =>
       _prefs.setInt(AppConstants.keyProxyPort, value);
 
-  bool get proxyEnabled => _prefs.getBool(AppConstants.keyProxyEnabled) ?? true;
+  bool get proxyEnabled => _prefs.getBool(AppConstants.keyProxyEnabled) ?? false;
   Future<void> setProxyEnabled(bool value) =>
       _prefs.setBool(AppConstants.keyProxyEnabled, value);
 
@@ -34,4 +34,17 @@ class StorageService {
       _prefs.getString(AppConstants.keyVoiceName) ?? AppConstants.defaultVoice;
   Future<void> setVoiceName(String value) =>
       _prefs.setString(AppConstants.keyVoiceName, value);
+
+  // Avatars
+  String? get aiAvatarPath => _prefs.getString('ai_avatar_path');
+  Future<void> setAiAvatarPath(String? value) {
+    if (value == null) return _prefs.remove('ai_avatar_path');
+    return _prefs.setString('ai_avatar_path', value);
+  }
+
+  String? get userAvatarPath => _prefs.getString('user_avatar_path');
+  Future<void> setUserAvatarPath(String? value) {
+    if (value == null) return _prefs.remove('user_avatar_path');
+    return _prefs.setString('user_avatar_path', value);
+  }
 }

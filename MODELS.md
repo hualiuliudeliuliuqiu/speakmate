@@ -61,16 +61,31 @@
 
 **Q: response_modalities 只能设 ["AUDIO"]，那怎么显示字幕？**
 
-A: Native Audio 模型在返回音频数据的同时，会**自动附带文字转写**。具体来说：
-- 服务端返回的 `serverContent.modelTurn.parts[]` 中，既有 `inlineData`（音频）也有 `text`（转写）
-- 这是 Gemini Live API 的内置功能 "Audio Transcriptions"
-- 不需要设置 response_modalities 为 TEXT，转写是自动的
-- App 只需要解析返回数据中的 text 字段，显示在界面上即可
+A: 需要在 setup message 中显式启用 `output_audio_transcription`：
 
-所以 SpeakMate **完全支持实时字幕**：
-1. AI 说话时，音频播放的同时在屏幕上显示对应文字
-2. 用户说话时，也可以显示语音识别结果（输入转写）
-3. 用户可以通过设置开关字幕显示
+```json
+{
+  "setup": {
+    "model": "models/gemini-2.5-flash-native-audio-latest",
+    "generation_config": {
+      "response_modalities": ["AUDIO"],
+      "speech_config": { ... }
+    },
+    "output_audio_transcription": {},
+    "system_instruction": { ... }
+  }
+}
+```
+
+**⚠️ 重要区分**：
+- `serverContent.modelTurn.parts[].text` — 这是模型的**思考/规划文本**（类似 CoT），不是语音转写！内容可能类似 "Acknowledge and Redirect: I've acknowledged the greeting..."
+- `serverContent.outputTranscription.text` — 这才是**真正的语音转写**，和 AI 说出的内容一致
+
+SpeakMate 只使用 `outputTranscription` 显示字幕，忽略 `modelTurn` 中的思考文本。
+
+### 音频播放策略
+
+SpeakMate 采用**完整播放**策略：收集整个 model turn 的所有音频数据，turn 结束后合成完整 WAV 一次性播放。这样避免了流式播放的音频截断问题。音频文件同时保存到本地供重播。
 
 ## ⚠️ 地域限制
 

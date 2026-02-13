@@ -25,10 +25,18 @@ class AudioService {
   // Callback for audio chunks from microphone
   void Function(Uint8List)? onAudioChunk;
 
-  // Buffer for collecting playback audio chunks
-  final List<int> _playbackBuffer = [];
-  Timer? _playbackTimer;
-  bool _isBuffering = false;
+  // Collect ALL PCM data for the current turn
+  final List<int> _turnPcmBuffer = [];
+
+  // We DON'T do streaming playback anymore — we wait for turn complete
+  // and play the full audio at once. This eliminates the "starts from middle" bug.
+
+  // Saved audio file paths by message ID
+  final Map<String, String> _savedAudioFiles = {};
+
+  // Notify listeners when replay state changes
+  final _replayStateController = StreamController<bool>.broadcast();
+  Stream<bool> get onReplayStateChanged => _replayStateController.stream;
 
   Future<bool> hasPermission() async {
     return await _recorder.hasPermission();
@@ -43,7 +51,6 @@ class AudioService {
       throw Exception('Microphone permission not granted');
     }
 
-    // Stop any playback
     await stopPlayback();
 
     final stream = await _recorder.startStream(
@@ -62,8 +69,6 @@ class AudioService {
     _recordingSub = stream.listen((data) {
       final bytes = Uint8List.fromList(data);
       onAudioChunk?.call(bytes);
-
-      // Calculate audio level for visualization
       _calculateAudioLevel(bytes);
     });
   }
@@ -78,45 +83,19 @@ class AudioService {
     _audioLevelController.add(0.0);
   }
 
-  /// Add audio data to the playback buffer
+  /// Add audio data — just collect, no streaming playback
   void addPlaybackData(Uint8List pcmData) {
-    _playbackBuffer.addAll(pcmData);
-
-    // Start playback after accumulating enough data (100ms worth)
-    // 24000 samples/sec * 2 bytes/sample * 0.1 sec = 4800 bytes
-    if (!_isBuffering && !_isPlaying && _playbackBuffer.length > 4800) {
-      _isBuffering = true;
-      // Small delay to buffer a bit more before starting playback
-      _playbackTimer?.cancel();
-      _playbackTimer = Timer(const Duration(milliseconds: 150), () {
-        _flushPlayback();
-      });
-    }
+    _turnPcmBuffer.addAll(pcmData);
   }
 
-  /// Called when model turn is complete — flush remaining buffer
-  Future<void> flushRemainingPlayback() async {
-    _playbackTimer?.cancel();
-    if (_playbackBuffer.isNotEmpty) {
-      await _flushPlayback();
-    }
-  }
+  /// Called when model turn is complete — save and play the FULL audio
+  Future<void> flushRemainingPlayback({String? messageId}) async {
+    if (_turnPcmBuffer.isEmpty) return;
 
-  Future<void> _flushPlayback() async {
-    if (_playbackBuffer.isEmpty) {
-      _isBuffering = false;
-      return;
-    }
-
-    _isPlaying = true;
-    _isBuffering = false;
-
-    // Take all buffered data
-    final pcmData = Uint8List.fromList(_playbackBuffer);
-    _playbackBuffer.clear();
+    final pcmData = Uint8List.fromList(_turnPcmBuffer);
+    _turnPcmBuffer.clear();
 
     try {
-      // Create WAV file from PCM data
       final wavData = _createWavFromPcm(
         pcmData,
         AppConstants.outputSampleRate,
@@ -124,33 +103,114 @@ class AudioService {
         AppConstants.numChannels,
       );
 
-      final tempDir = await getTemporaryDirectory();
-      final tempFile = File(
-        '${tempDir.path}/speakmate_playback_${DateTime.now().millisecondsSinceEpoch}.wav',
-      );
-      await tempFile.writeAsBytes(wavData);
-
-      await _player.play(DeviceFileSource(tempFile.path));
-
-      // Wait for playback to complete
-      await _player.onPlayerComplete.first.timeout(
-        const Duration(seconds: 30),
-        onTimeout: () {},
-      );
-
-      // Cleanup temp file
-      try {
-        await tempFile.delete();
-      } catch (_) {}
-
-      // If more data arrived during playback, flush again
-      if (_playbackBuffer.isNotEmpty) {
-        await _flushPlayback();
+      final appDir = await getApplicationDocumentsDirectory();
+      final audioDir = Directory('${appDir.path}/audio');
+      if (!await audioDir.exists()) {
+        await audioDir.create(recursive: true);
       }
+
+      // Save as persistent file (used for both initial play and replay)
+      final fileName = messageId ?? '${DateTime.now().millisecondsSinceEpoch}';
+      final wavFile = File('${audioDir.path}/$fileName.wav');
+      await wavFile.writeAsBytes(wavData);
+
+      if (messageId != null) {
+        _savedAudioFiles[messageId] = wavFile.path;
+      }
+
+      // Play the complete audio
+      _isPlaying = true;
+      await _player.play(DeviceFileSource(wavFile.path));
+
+      // Wait for actual completion
+      final completer = Completer<void>();
+      late StreamSubscription sub;
+      sub = _player.onPlayerComplete.listen((_) {
+        if (!completer.isCompleted) completer.complete();
+        sub.cancel();
+      });
+
+      // Timeout safety
+      await completer.future.timeout(
+        const Duration(seconds: 120),
+        onTimeout: () {
+          sub.cancel();
+        },
+      );
     } catch (e) {
       debugPrint('Playback error: $e');
     } finally {
       _isPlaying = false;
+    }
+  }
+
+  /// Replay audio for a specific message ID
+  Future<void> replayAudio(String messageId) async {
+    String? filePath = _savedAudioFiles[messageId];
+
+    // Try to find on disk if not in memory cache
+    if (filePath == null) {
+      final appDir = await getApplicationDocumentsDirectory();
+      final candidate = File('${appDir.path}/audio/$messageId.wav');
+      if (await candidate.exists()) {
+        filePath = candidate.path;
+        _savedAudioFiles[messageId] = filePath;
+      }
+    }
+
+    if (filePath == null) return;
+
+    final file = File(filePath);
+    if (!await file.exists()) {
+      _savedAudioFiles.remove(messageId);
+      return;
+    }
+
+    await stopPlayback();
+
+    _isPlaying = true;
+    _replayStateController.add(true);
+
+    try {
+      await _player.play(DeviceFileSource(filePath));
+
+      // Wait for actual completion using a completer
+      final completer = Completer<void>();
+      late StreamSubscription sub;
+      sub = _player.onPlayerComplete.listen((_) {
+        if (!completer.isCompleted) completer.complete();
+        sub.cancel();
+      });
+
+      await completer.future.timeout(
+        const Duration(seconds: 120),
+        onTimeout: () {
+          sub.cancel();
+        },
+      );
+    } catch (e) {
+      debugPrint('Replay error: $e');
+    } finally {
+      _isPlaying = false;
+      _replayStateController.add(false);
+    }
+  }
+
+  /// Check if a message has saved audio (sync, from cache)
+  bool hasAudio(String messageId) {
+    return _savedAudioFiles.containsKey(messageId);
+  }
+
+  /// Pre-load audio cache for a list of message IDs
+  Future<void> preloadAudioCache(List<String> messageIds) async {
+    final appDir = await getApplicationDocumentsDirectory();
+    for (final id in messageIds) {
+      if (!_savedAudioFiles.containsKey(id)) {
+        final file = File('${appDir.path}/audio/$id.wav');
+        if (await file.exists()) {
+          _savedAudioFiles[id] = file.path;
+        }
+      }
     }
   }
 
@@ -167,35 +227,22 @@ class AudioService {
     final fileSize = 36 + dataSize;
 
     final header = ByteData(44);
-    // RIFF header
-    header.setUint8(0, 0x52); // R
-    header.setUint8(1, 0x49); // I
-    header.setUint8(2, 0x46); // F
-    header.setUint8(3, 0x46); // F
+    header.setUint8(0, 0x52); header.setUint8(1, 0x49);
+    header.setUint8(2, 0x46); header.setUint8(3, 0x46);
     header.setUint32(4, fileSize, Endian.little);
-    header.setUint8(8, 0x57); // W
-    header.setUint8(9, 0x41); // A
-    header.setUint8(10, 0x56); // V
-    header.setUint8(11, 0x45); // E
-
-    // fmt chunk
-    header.setUint8(12, 0x66); // f
-    header.setUint8(13, 0x6D); // m
-    header.setUint8(14, 0x74); // t
-    header.setUint8(15, 0x20); // (space)
-    header.setUint32(16, 16, Endian.little); // chunk size
-    header.setUint16(20, 1, Endian.little); // PCM format
+    header.setUint8(8, 0x57); header.setUint8(9, 0x41);
+    header.setUint8(10, 0x56); header.setUint8(11, 0x45);
+    header.setUint8(12, 0x66); header.setUint8(13, 0x6D);
+    header.setUint8(14, 0x74); header.setUint8(15, 0x20);
+    header.setUint32(16, 16, Endian.little);
+    header.setUint16(20, 1, Endian.little);
     header.setUint16(22, numChannels, Endian.little);
     header.setUint32(24, sampleRate, Endian.little);
     header.setUint32(28, byteRate, Endian.little);
     header.setUint16(32, blockAlign, Endian.little);
     header.setUint16(34, bitsPerSample, Endian.little);
-
-    // data chunk
-    header.setUint8(36, 0x64); // d
-    header.setUint8(37, 0x61); // a
-    header.setUint8(38, 0x74); // t
-    header.setUint8(39, 0x61); // a
+    header.setUint8(36, 0x64); header.setUint8(37, 0x61);
+    header.setUint8(38, 0x74); header.setUint8(39, 0x61);
     header.setUint32(40, dataSize, Endian.little);
 
     final result = Uint8List(44 + pcmData.length);
@@ -206,26 +253,20 @@ class AudioService {
 
   void _calculateAudioLevel(Uint8List bytes) {
     if (bytes.length < 2) return;
-
-    // Interpret as 16-bit signed PCM
     final samples = bytes.buffer.asInt16List();
     double sumSquares = 0;
     for (final sample in samples) {
       sumSquares += sample * sample;
     }
     final rms = sumSquares / samples.length;
-    // Normalize to 0-1 range (max int16 is 32768)
     final level = (rms / (32768 * 32768)).clamp(0.0, 1.0);
-    // Apply sqrt for better visual scaling
     final scaledLevel = level > 0 ? (level * 10).clamp(0.0, 1.0) : 0.0;
     _audioLevelController.add(scaledLevel);
   }
 
   /// Stop all playback
   Future<void> stopPlayback() async {
-    _playbackTimer?.cancel();
-    _playbackBuffer.clear();
-    _isBuffering = false;
+    _turnPcmBuffer.clear();
     _isPlaying = false;
     await _player.stop();
   }
@@ -236,5 +277,6 @@ class AudioService {
     _recorder.dispose();
     _player.dispose();
     _audioLevelController.close();
+    _replayStateController.close();
   }
 }
