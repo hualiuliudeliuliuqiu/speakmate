@@ -262,10 +262,10 @@ class _StandardChatScreenState extends State<StandardChatScreen> {
 
     final convService = context.read<ConversationService>();
 
-    // Add user voice message
+    // Add user voice message (will be updated with transcription)
     final userMsg = Message(
       role: MessageRole.user,
-      text: '🎤 $durStr',
+      text: '',
       isVoice: true,
     );
     setState(() {
@@ -277,10 +277,30 @@ class _StandardChatScreenState extends State<StandardChatScreen> {
     await convService.addMessage(_conversation.id, userMsg);
 
     try {
-      // Send audio to Gemini — it understands speech directly
-      final responseText = await _gemini.sendAudioMessage(pcmData);
+      // Run transcription and AI response in parallel
+      final results = await Future.wait([
+        _gemini.sendAudioMessage(pcmData),
+        _gemini.transcribeAudio(pcmData).then((v) => v ?? ''),
+      ]);
+
+      final responseText = results[0];
+      final transcription = results[1];
 
       if (!mounted) return;
+
+      // Update user voice message with transcription
+      if (transcription.isNotEmpty) {
+        setState(() {
+          userMsg.text = transcription;
+        });
+        convService.updateLastUserMessage(_conversation.id, transcription);
+      } else {
+        // Fallback: show duration if transcription failed
+        setState(() {
+          userMsg.text = durStr;
+        });
+        convService.updateLastUserMessage(_conversation.id, durStr);
+      }
 
       final assistantMsg =
           Message(role: MessageRole.assistant, text: responseText);

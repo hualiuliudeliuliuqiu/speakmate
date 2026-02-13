@@ -281,6 +281,78 @@ class GeminiTextService {
     return out;
   }
 
+  /// Transcribe audio to text using Gemini (standalone, doesn't affect history)
+  Future<String?> transcribeAudio(Uint8List pcmData) async {
+    if (_apiKey == null || _apiKey!.isEmpty) return null;
+
+    final wavData = _buildWav(pcmData);
+    final base64Audio = base64Encode(wavData);
+
+    try {
+      final url = Uri.parse(
+        'https://generativelanguage.googleapis.com/v1beta/models/'
+        '${AppConstants.geminiTextModel}:generateContent?key=$_apiKey',
+      );
+
+      final body = jsonEncode({
+        'contents': [
+          {
+            'parts': [
+              {
+                'inlineData': {
+                  'mimeType': 'audio/wav',
+                  'data': base64Audio,
+                },
+              },
+              {
+                'text': 'Transcribe exactly what the user said in this audio. '
+                    'Output ONLY the transcription, nothing else. '
+                    'If they spoke English, transcribe in English. '
+                    'If they spoke Chinese, transcribe in Simplified Chinese.',
+              },
+            ],
+          },
+        ],
+        'generation_config': {
+          'temperature': 0.0,
+          'max_output_tokens': 200,
+        },
+      });
+
+      http.Response response;
+
+      if (!kIsWeb && _proxyEnabled && _proxyHost != null && _proxyPort != null) {
+        final httpClient = HttpClient();
+        httpClient.findProxy = (uri) => 'PROXY $_proxyHost:$_proxyPort';
+        final request = await httpClient.postUrl(url);
+        request.headers.contentType = ContentType.json;
+        request.write(body);
+        final ioResponse = await request.close();
+        final responseBody = await ioResponse.transform(utf8.decoder).join();
+        response = http.Response(responseBody, ioResponse.statusCode);
+        httpClient.close();
+      } else {
+        response = await http.post(
+          url,
+          headers: {'Content-Type': 'application/json'},
+          body: body,
+        );
+      }
+
+      if (response.statusCode != 200) return null;
+
+      final data = jsonDecode(response.body);
+      final candidates = data['candidates'] as List?;
+      if (candidates == null || candidates.isEmpty) return null;
+
+      final parts = candidates[0]['content']['parts'] as List;
+      return parts.map((p) => p['text'] as String).join().trim();
+    } catch (e) {
+      debugPrint('Transcribe error: $e');
+      return null;
+    }
+  }
+
   /// Clear conversation history
   void clearHistory() {
     _history.clear();
