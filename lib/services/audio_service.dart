@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
+import 'package:mp_audio_stream/mp_audio_stream.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
@@ -10,10 +12,14 @@ import '../config/constants.dart';
 
 class AudioService {
   final AudioRecorder _recorder = AudioRecorder();
-  final AudioPlayer _player = AudioPlayer();
+  final AudioPlayer _replayPlayer = AudioPlayer();
   StreamSubscription<List<int>>? _recordingSub;
   bool _isRecording = false;
   bool _isPlaying = false;
+
+  // mp_audio_stream for real-time PCM push playback
+  late AudioStream _audioStream;
+  bool _streamInitialized = false;
 
   // Audio level for visualization
   final _audioLevelController = StreamController<double>.broadcast();
@@ -25,11 +31,8 @@ class AudioService {
   // Callback for audio chunks from microphone
   void Function(Uint8List)? onAudioChunk;
 
-  // Collect ALL PCM data for the current turn
+  // Collect all PCM data for the current turn (for saving replay file)
   final List<int> _turnPcmBuffer = [];
-
-  // We DON'T do streaming playback anymore — we wait for turn complete
-  // and play the full audio at once. This eliminates the "starts from middle" bug.
 
   // Saved audio file paths by message ID
   final Map<String, String> _savedAudioFiles = {};
@@ -37,6 +40,23 @@ class AudioService {
   // Notify listeners when replay state changes
   final _replayStateController = StreamController<bool>.broadcast();
   Stream<bool> get onReplayStateChanged => _replayStateController.stream;
+
+  AudioService() {
+    _audioStream = getAudioStream();
+  }
+
+  void _ensureStreamInit() {
+    if (!_streamInitialized) {
+      _audioStream.init(
+        sampleRate: AppConstants.outputSampleRate, // 24000
+        channels: AppConstants.numChannels, // 1
+        bufferMilliSec: 5000, // 5 second buffer
+        waitingBufferMilliSec: 50, // start playing after 50ms of data
+      );
+      _audioStream.resume();
+      _streamInitialized = true;
+    }
+  }
 
   Future<bool> hasPermission() async {
     return await _recorder.hasPermission();
@@ -51,6 +71,7 @@ class AudioService {
       throw Exception('Microphone permission not granted');
     }
 
+    // Stop any playback
     await stopPlayback();
 
     final stream = await _recorder.startStream(
@@ -83,21 +104,53 @@ class AudioService {
     _audioLevelController.add(0.0);
   }
 
-  /// Add audio data — just collect, no streaming playback
+  /// Add audio data — push to real-time stream AND collect for saving
   void addPlaybackData(Uint8List pcmData) {
+    // Collect for saving later
     _turnPcmBuffer.addAll(pcmData);
+
+    // Convert Int16 PCM to Float32 and push to audio stream for immediate playback
+    _ensureStreamInit();
+    final float32 = _pcm16ToFloat32(pcmData);
+    _audioStream.push(float32);
+    _isPlaying = true;
   }
 
-  /// Called when model turn is complete — save and play the FULL audio
+  /// Convert 16-bit signed PCM (little-endian) to Float32 (-1.0 to 1.0)
+  Float32List _pcm16ToFloat32(Uint8List pcmData) {
+    // Ensure even length
+    final alignedLength = pcmData.length - (pcmData.length % 2);
+    final numSamples = alignedLength ~/ 2;
+    final float32 = Float32List(numSamples);
+
+    final byteData = ByteData.sublistView(pcmData, 0, alignedLength);
+    for (int i = 0; i < numSamples; i++) {
+      final sample = byteData.getInt16(i * 2, Endian.little);
+      float32[i] = sample / 32768.0;
+    }
+    return float32;
+  }
+
+  /// Called when model turn is complete — save the audio for replay
   Future<void> flushRemainingPlayback({String? messageId}) async {
-    if (_turnPcmBuffer.isEmpty) return;
-
-    final pcmData = Uint8List.fromList(_turnPcmBuffer);
+    // The audio is already playing via the stream — just need to save for replay
+    if (messageId != null && _turnPcmBuffer.isNotEmpty) {
+      await _saveTurnAudio(messageId);
+    }
     _turnPcmBuffer.clear();
+    // _isPlaying will be set to false by the model turn monitor
+  }
 
+  /// Mark playback as done (called by chat screen when model turn ends)
+  void markPlaybackDone() {
+    _isPlaying = false;
+  }
+
+  /// Save the complete turn PCM data as a WAV file for replay
+  Future<void> _saveTurnAudio(String messageId) async {
     try {
       final wavData = _createWavFromPcm(
-        pcmData,
+        Uint8List.fromList(_turnPcmBuffer),
         AppConstants.outputSampleRate,
         AppConstants.bitsPerSample,
         AppConstants.numChannels,
@@ -109,46 +162,18 @@ class AudioService {
         await audioDir.create(recursive: true);
       }
 
-      // Save as persistent file (used for both initial play and replay)
-      final fileName = messageId ?? '${DateTime.now().millisecondsSinceEpoch}';
-      final wavFile = File('${audioDir.path}/$fileName.wav');
-      await wavFile.writeAsBytes(wavData);
-
-      if (messageId != null) {
-        _savedAudioFiles[messageId] = wavFile.path;
-      }
-
-      // Play the complete audio
-      _isPlaying = true;
-      await _player.play(DeviceFileSource(wavFile.path));
-
-      // Wait for actual completion
-      final completer = Completer<void>();
-      late StreamSubscription sub;
-      sub = _player.onPlayerComplete.listen((_) {
-        if (!completer.isCompleted) completer.complete();
-        sub.cancel();
-      });
-
-      // Timeout safety
-      await completer.future.timeout(
-        const Duration(seconds: 120),
-        onTimeout: () {
-          sub.cancel();
-        },
-      );
+      final file = File('${audioDir.path}/$messageId.wav');
+      await file.writeAsBytes(wavData);
+      _savedAudioFiles[messageId] = file.path;
     } catch (e) {
-      debugPrint('Playback error: $e');
-    } finally {
-      _isPlaying = false;
+      debugPrint('Failed to save turn audio: $e');
     }
   }
 
-  /// Replay audio for a specific message ID
+  /// Replay audio for a specific message ID (uses audioplayers for file playback)
   Future<void> replayAudio(String messageId) async {
     String? filePath = _savedAudioFiles[messageId];
 
-    // Try to find on disk if not in memory cache
     if (filePath == null) {
       final appDir = await getApplicationDocumentsDirectory();
       final candidate = File('${appDir.path}/audio/$messageId.wav');
@@ -166,18 +191,17 @@ class AudioService {
       return;
     }
 
+    // Stop any real-time stream playback first
     await stopPlayback();
 
-    _isPlaying = true;
     _replayStateController.add(true);
 
     try {
-      await _player.play(DeviceFileSource(filePath));
+      await _replayPlayer.play(DeviceFileSource(filePath));
 
-      // Wait for actual completion using a completer
       final completer = Completer<void>();
       late StreamSubscription sub;
-      sub = _player.onPlayerComplete.listen((_) {
+      sub = _replayPlayer.onPlayerComplete.listen((_) {
         if (!completer.isCompleted) completer.complete();
         sub.cancel();
       });
@@ -191,7 +215,6 @@ class AudioService {
     } catch (e) {
       debugPrint('Replay error: $e');
     } finally {
-      _isPlaying = false;
       _replayStateController.add(false);
     }
   }
@@ -268,14 +291,22 @@ class AudioService {
   Future<void> stopPlayback() async {
     _turnPcmBuffer.clear();
     _isPlaying = false;
-    await _player.stop();
+    // Re-init stream to clear its buffer
+    if (_streamInitialized) {
+      _audioStream.uninit();
+      _streamInitialized = false;
+    }
+    await _replayPlayer.stop();
   }
 
   void dispose() {
     stopRecording();
     stopPlayback();
     _recorder.dispose();
-    _player.dispose();
+    _replayPlayer.dispose();
+    if (_streamInitialized) {
+      _audioStream.uninit();
+    }
     _audioLevelController.close();
     _replayStateController.close();
   }

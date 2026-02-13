@@ -187,6 +187,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           }
           _currentAssistantText = '';
         });
+        _audio.markPlaybackDone();
         _audio.flushRemainingPlayback(messageId: msgId).then((_) {
           if (mounted) setState(() {}); // refresh to show replay button
         });
