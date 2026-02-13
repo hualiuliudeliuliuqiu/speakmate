@@ -4,11 +4,11 @@ import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/foundation.dart';
-import 'package:mp_audio_stream/mp_audio_stream.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 
 import '../config/constants.dart';
+import 'native_audio_player.dart';
 
 class AudioService {
   final AudioRecorder _recorder = AudioRecorder();
@@ -17,8 +17,8 @@ class AudioService {
   bool _isRecording = false;
   bool _isPlaying = false;
 
-  // mp_audio_stream for real-time PCM push playback
-  late AudioStream _audioStream;
+  // Native audio player for real-time PCM push playback (uses AudioTrack with AEC support)
+  final NativeAudioPlayer _nativePlayer = NativeAudioPlayer();
   bool _streamInitialized = false;
 
   // Audio level for visualization
@@ -41,19 +41,14 @@ class AudioService {
   final _replayStateController = StreamController<bool>.broadcast();
   Stream<bool> get onReplayStateChanged => _replayStateController.stream;
 
-  AudioService() {
-    _audioStream = getAudioStream();
-  }
+  AudioService();
 
-  void _ensureStreamInit() {
+  Future<void> _ensureStreamInit() async {
     if (!_streamInitialized) {
-      _audioStream.init(
+      await _nativePlayer.init(
         sampleRate: AppConstants.outputSampleRate, // 24000
         channels: AppConstants.numChannels, // 1
-        bufferMilliSec: 30000, // 30 second buffer for large TTS responses
-        waitingBufferMilliSec: 50, // start playing after 50ms of data
       );
-      _audioStream.resume();
       _streamInitialized = true;
     }
   }
@@ -82,6 +77,9 @@ class AudioService {
         autoGain: true,
         echoCancel: true,
         noiseSuppress: true,
+        androidConfig: AndroidRecordConfig(
+          audioSource: AndroidAudioSource.voiceCommunication,
+        ),
       ),
     );
 
@@ -104,38 +102,15 @@ class AudioService {
     _audioLevelController.add(0.0);
   }
 
-  /// Add audio data — push to real-time stream AND collect for saving.
-  /// Large data is split into chunks to avoid overflowing mp_audio_stream's buffer.
-  void addPlaybackData(Uint8List pcmData) {
+  /// Add audio data — push to native player AND collect for saving.
+  Future<void> addPlaybackData(Uint8List pcmData) async {
     // Collect for saving later
     _turnPcmBuffer.addAll(pcmData);
 
-    // Convert Int16 PCM to Float32 and push to audio stream for immediate playback
-    _ensureStreamInit();
-    final float32 = _pcm16ToFloat32(pcmData);
-
-    // Push in chunks of ~1 second (24000 samples) to avoid buffer overflow
-    const chunkSize = 24000;
-    for (int offset = 0; offset < float32.length; offset += chunkSize) {
-      final end = (offset + chunkSize).clamp(0, float32.length);
-      _audioStream.push(Float32List.sublistView(float32, offset, end));
-    }
+    // Push PCM16 directly to native AudioTrack (no format conversion needed)
+    await _ensureStreamInit();
+    await _nativePlayer.push(pcmData);
     _isPlaying = true;
-  }
-
-  /// Convert 16-bit signed PCM (little-endian) to Float32 (-1.0 to 1.0)
-  Float32List _pcm16ToFloat32(Uint8List pcmData) {
-    // Ensure even length
-    final alignedLength = pcmData.length - (pcmData.length % 2);
-    final numSamples = alignedLength ~/ 2;
-    final float32 = Float32List(numSamples);
-
-    final byteData = ByteData.sublistView(pcmData, 0, alignedLength);
-    for (int i = 0; i < numSamples; i++) {
-      final sample = byteData.getInt16(i * 2, Endian.little);
-      float32[i] = sample / 32768.0;
-    }
-    return float32;
   }
 
   /// Called when model turn is complete — save the audio for replay
@@ -298,9 +273,9 @@ class AudioService {
   Future<void> stopPlayback() async {
     _turnPcmBuffer.clear();
     _isPlaying = false;
-    // Re-init stream to clear its buffer
+    // Stop native player and clear its buffer
     if (_streamInitialized) {
-      _audioStream.uninit();
+      await _nativePlayer.stop();
       _streamInitialized = false;
     }
     await _replayPlayer.stop();
@@ -311,9 +286,7 @@ class AudioService {
     stopPlayback();
     _recorder.dispose();
     _replayPlayer.dispose();
-    if (_streamInitialized) {
-      _audioStream.uninit();
-    }
+    _nativePlayer.dispose();
     _audioLevelController.close();
     _replayStateController.close();
   }
