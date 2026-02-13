@@ -17,10 +17,21 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  // Gemini
   late TextEditingController _apiKeyController;
   late TextEditingController _proxyHostController;
   late TextEditingController _proxyPortController;
   bool _proxyEnabled = true;
+
+  // VolcEngine
+  late TextEditingController _volcApiKeyController;
+  late TextEditingController _volcAppIdController;
+
+  // MiniMax
+  late TextEditingController _minimaxApiKeyController;
+  late TextEditingController _minimaxGroupIdController;
+
+  AIProvider _selectedProvider = AIProvider.gemini;
   String _selectedVoice = AppConstants.defaultVoice;
   bool _obscureApiKey = true;
 
@@ -34,10 +45,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
         TextEditingController(text: storage.proxyPort.toString());
     _proxyEnabled = storage.proxyEnabled;
     _selectedVoice = storage.voiceName;
+    _selectedProvider = storage.aiProvider;
+
+    _volcApiKeyController = TextEditingController(text: storage.volcApiKey);
+    _volcAppIdController = TextEditingController(text: storage.volcAppId);
+    _minimaxApiKeyController = TextEditingController(text: storage.minimaxApiKey);
+    _minimaxGroupIdController = TextEditingController(text: storage.minimaxGroupId);
   }
 
   Future<void> _save() async {
     final storage = context.read<StorageService>();
+    await storage.setAIProvider(_selectedProvider);
     await storage.setApiKey(_apiKeyController.text.trim());
     await storage.setProxyHost(_proxyHostController.text.trim());
     await storage.setProxyPort(
@@ -46,6 +64,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
     await storage.setProxyEnabled(_proxyEnabled);
     await storage.setVoiceName(_selectedVoice);
+
+    // Save VolcEngine config
+    await storage.setVolcApiKey(_volcApiKeyController.text.trim());
+    await storage.setVolcAppId(_volcAppIdController.text.trim());
+
+    // Save MiniMax config
+    await storage.setMinimaxApiKey(_minimaxApiKeyController.text.trim());
+    await storage.setMinimaxGroupId(_minimaxGroupIdController.text.trim());
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -72,6 +98,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _apiKeyController.dispose();
     _proxyHostController.dispose();
     _proxyPortController.dispose();
+    _volcApiKeyController.dispose();
+    _volcAppIdController.dispose();
+    _minimaxApiKeyController.dispose();
+    _minimaxGroupIdController.dispose();
     super.dispose();
   }
 
@@ -103,56 +133,126 @@ class _SettingsScreenState extends State<SettingsScreen> {
       body: ListView(
         padding: const EdgeInsets.all(AppTheme.spacingMd),
         children: [
-          // ─── API Key Section ───
-          _buildSectionHeader('API Configuration', Icons.key_rounded),
+          // ─── AI Engine Section ───
+          _buildSectionHeader('AI Engine', Icons.auto_awesome_rounded),
           const SizedBox(height: AppTheme.spacingSm),
           _buildCard(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Gemini API Key', style: AppTheme.headingSm.copyWith(fontSize: 14)),
-                const SizedBox(height: 4),
-                Text(
-                  'Get yours free at aistudio.google.com',
-                  style: AppTheme.caption,
-                ),
+                Text('Choose AI Provider', style: AppTheme.headingSm.copyWith(fontSize: 14)),
                 const SizedBox(height: AppTheme.spacingMd),
-                TextField(
-                  controller: _apiKeyController,
-                  obscureText: _obscureApiKey,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontFamily: 'monospace',
-                    color: AppTheme.textPrimary,
-                  ),
-                  decoration: InputDecoration(
-                    hintText: 'AIzaSy...',
-                    filled: true,
-                    fillColor: AppTheme.backgroundAlt,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-                      borderSide: BorderSide.none,
-                    ),
-                    suffixIcon: IconButton(
-                      icon: Icon(
-                        _obscureApiKey
-                            ? Icons.visibility_off_outlined
-                            : Icons.visibility_outlined,
-                        size: 20,
-                        color: AppTheme.textMuted,
+                ...AIProvider.values.map((provider) {
+                  final isSelected = provider == _selectedProvider;
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: AppTheme.spacingSm),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: () => setState(() => _selectedProvider = provider),
+                        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 150),
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: isSelected ? AppTheme.primarySurface : AppTheme.backgroundAlt,
+                            borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+                            border: Border.all(
+                              color: isSelected ? AppTheme.primary : AppTheme.border,
+                              width: isSelected ? 2 : 1,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                isSelected ? Icons.radio_button_checked : Icons.radio_button_off,
+                                size: 20,
+                                color: isSelected ? AppTheme.primary : AppTheme.textMuted,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      provider.displayName,
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                                        color: isSelected ? AppTheme.primary : AppTheme.textPrimary,
+                                      ),
+                                    ),
+                                    Text(
+                                      provider.description,
+                                      style: AppTheme.caption.copyWith(fontSize: 11),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
-                      onPressed: () =>
-                          setState(() => _obscureApiKey = !_obscureApiKey),
                     ),
-                  ),
-                ),
+                  );
+                }),
               ],
             ),
           ),
 
           const SizedBox(height: AppTheme.spacingLg),
 
-          // ─── Proxy Section ───
+          // ─── API Key Section (dynamic per provider) ───
+          _buildSectionHeader('API Configuration', Icons.key_rounded),
+          const SizedBox(height: AppTheme.spacingSm),
+          if (_selectedProvider == AIProvider.gemini)
+            _buildCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Gemini API Key', style: AppTheme.headingSm.copyWith(fontSize: 14)),
+                  const SizedBox(height: 4),
+                  Text('Get yours free at aistudio.google.com', style: AppTheme.caption),
+                  const SizedBox(height: AppTheme.spacingMd),
+                  _buildApiKeyField(_apiKeyController, 'AIzaSy...'),
+                ],
+              ),
+            )
+          else if (_selectedProvider == AIProvider.volcengine)
+            _buildCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('VolcEngine / 火山引擎', style: AppTheme.headingSm.copyWith(fontSize: 14)),
+                  const SizedBox(height: 4),
+                  Text('console.volcengine.com', style: AppTheme.caption),
+                  const SizedBox(height: AppTheme.spacingMd),
+                  _buildTextField(_volcAppIdController, 'App ID (如: 8402739639)'),
+                  const SizedBox(height: AppTheme.spacingSm),
+                  _buildApiKeyField(_volcApiKeyController, 'Access Token'),
+                ],
+              ),
+            )
+          else if (_selectedProvider == AIProvider.minimax)
+            _buildCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('MiniMax', style: AppTheme.headingSm.copyWith(fontSize: 14)),
+                  const SizedBox(height: 4),
+                  Text('platform.minimaxi.com', style: AppTheme.caption),
+                  const SizedBox(height: AppTheme.spacingMd),
+                  _buildApiKeyField(_minimaxApiKeyController, 'API Key...'),
+                  const SizedBox(height: AppTheme.spacingSm),
+                  _buildTextField(_minimaxGroupIdController, 'Group ID'),
+                ],
+              ),
+            ),
+
+          const SizedBox(height: AppTheme.spacingLg),
+
+          // ─── Proxy Section (Gemini only) ───
+          if (_selectedProvider == AIProvider.gemini) ...[
           _buildSectionHeader('Network Proxy', Icons.vpn_key_rounded),
           const SizedBox(height: AppTheme.spacingSm),
           _buildCard(
@@ -226,10 +326,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ],
             ),
           ),
+          ], // end if Gemini proxy
 
           const SizedBox(height: AppTheme.spacingLg),
 
-          // ─── Voice Section ───
+          // ─── Voice Section (Gemini only for now) ───
+          if (_selectedProvider == AIProvider.gemini) ...[
           _buildSectionHeader('AI Voice', Icons.record_voice_over_rounded),
           const SizedBox(height: AppTheme.spacingSm),
           _buildCard(
@@ -285,6 +387,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ],
             ),
           ),
+          ], // end if Gemini voice
 
           const SizedBox(height: AppTheme.spacingLg),
 
@@ -340,7 +443,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Powered by Gemini Live API',
+                  'Engine: ${_selectedProvider.displayName}',
                   style: AppTheme.caption.copyWith(
                     color: AppTheme.textMuted,
                     fontSize: 11,
@@ -352,6 +455,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
           const SizedBox(height: AppTheme.spacingXl),
         ],
+      ),
+    );
+  }
+
+  Widget _buildApiKeyField(TextEditingController controller, String hint) {
+    return TextField(
+      controller: controller,
+      obscureText: _obscureApiKey,
+      style: const TextStyle(
+        fontSize: 14,
+        fontFamily: 'monospace',
+        color: AppTheme.textPrimary,
+      ),
+      decoration: InputDecoration(
+        hintText: hint,
+        filled: true,
+        fillColor: AppTheme.backgroundAlt,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+          borderSide: BorderSide.none,
+        ),
+        suffixIcon: IconButton(
+          icon: Icon(
+            _obscureApiKey ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+            size: 20,
+            color: AppTheme.textMuted,
+          ),
+          onPressed: () => setState(() => _obscureApiKey = !_obscureApiKey),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTextField(TextEditingController controller, String label) {
+    return TextField(
+      controller: controller,
+      style: const TextStyle(fontSize: 14, color: AppTheme.textPrimary),
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: AppTheme.caption,
+        filled: true,
+        fillColor: AppTheme.backgroundAlt,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+          borderSide: BorderSide.none,
+        ),
       ),
     );
   }

@@ -8,9 +8,11 @@ import '../config/theme.dart';
 import '../models/conversation.dart';
 import '../models/message.dart';
 import '../models/scenario.dart';
+import '../config/constants.dart';
 import '../services/audio_service.dart';
 import '../services/conversation_service.dart';
 import '../services/gemini_live_service.dart';
+import '../services/live_service_interface.dart';
 import '../services/storage_service.dart';
 import '../widgets/audio_visualizer.dart';
 import '../widgets/transcript_bubble.dart';
@@ -25,7 +27,7 @@ class ChatScreen extends StatefulWidget {
 }
 
 class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
-  final GeminiLiveService _gemini = GeminiLiveService();
+  late LiveServiceWrapper _gemini;
   final AudioService _audio = AudioService();
   final ScrollController _scrollController = ScrollController();
   final TextEditingController _textController = TextEditingController();
@@ -83,8 +85,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<void> _initConnection() async {
     final storage = context.read<StorageService>();
-    final apiKey = storage.apiKey;
-    if (apiKey.isEmpty) {
+    final activeKey = storage.activeApiKey;
+    if (activeKey.isEmpty) {
       setState(() {
         _errorMessage = 'API key not configured. Please check Settings.';
       });
@@ -96,6 +98,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _transcriptSub?.cancel();
     _userTranscriptSub?.cancel();
 
+    // Initialize live service based on selected provider
+    _gemini = LiveServiceWrapper(storage.aiProvider);
+
     // Build context from previous conversation for continuity
     final contextSummary = _conversation.buildContextSummary();
     final scenarioContext = widget.scenario.systemPromptAddition;
@@ -104,11 +109,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         .join('\n\n');
 
     _gemini.configure(
-      apiKey: apiKey,
-      proxyHost: storage.proxyHost,
-      proxyPort: storage.proxyPort,
-      proxyEnabled: storage.proxyEnabled,
-      voiceName: storage.voiceName,
+      storage: storage,
       systemPromptAddition: fullAddition.isNotEmpty ? fullAddition : null,
     );
 
@@ -120,6 +121,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _errorMessage = 'Connection lost. Tap to reconnect.';
         } else if (state == GeminiConnectionState.connected) {
           _errorMessage = null;
+          // VolcEngine requires continuous audio stream for VAD.
+          // Auto-start recording on connection.
+          if (_gemini.provider == AIProvider.volcengine && !_isRecording) {
+            _startRecording();
+          }
         }
       });
     });
@@ -156,7 +162,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (!mounted) return;
       final convService = context.read<ConversationService>();
       setState(() {
-        _currentUserTranscript += text;
+        // VolcEngine sends full ASR text (replace), Gemini sends incremental tokens (append)
+        if (_gemini.provider == AIProvider.volcengine) {
+          _currentUserTranscript = text; // replace
+        } else {
+          _currentUserTranscript += text; // append
+        }
         // Find the last user voice message and update its transcription
         for (int i = _messages.length - 1; i >= 0; i--) {
           if (_messages[i].role == MessageRole.user && _messages[i].isVoice) {
@@ -233,6 +244,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
 
     if (_isRecording) {
+      // VolcEngine: keep recording (VAD auto-detects speech), only stop on disconnect
+      if (_gemini.provider == AIProvider.volcengine) {
+        // User tapped stop → disconnect entirely
+        await _stopRecording();
+        await _gemini.disconnect();
+        return;
+      }
       await _stopRecording();
     } else {
       await _startRecording();
@@ -315,7 +333,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
 
     // Note: Do NOT send turn_complete for realtime_input audio.
-    // Gemini detects end-of-speech automatically via voice activity detection.
+    // Both Gemini and VolcEngine detect end-of-speech automatically via VAD.
     // Voice message was already added in _startRecording.
   }
 

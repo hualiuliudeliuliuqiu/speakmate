@@ -29,6 +29,47 @@ class StorageService {
   Future<void> setProxyEnabled(bool value) =>
       _prefs.setBool(AppConstants.keyProxyEnabled, value);
 
+  // AI Provider
+  AIProvider get aiProvider {
+    final name = _prefs.getString(AppConstants.keyAIProvider);
+    return AIProvider.values.firstWhere(
+      (p) => p.name == name,
+      orElse: () => AIProvider.gemini,
+    );
+  }
+  Future<void> setAIProvider(AIProvider value) =>
+      _prefs.setString(AppConstants.keyAIProvider, value.name);
+
+  // VolcEngine
+  String get volcApiKey => _prefs.getString(AppConstants.keyVolcApiKey) ?? '';
+  Future<void> setVolcApiKey(String value) =>
+      _prefs.setString(AppConstants.keyVolcApiKey, value);
+
+  String get volcAppId => _prefs.getString(AppConstants.keyVolcAppId) ?? '';
+  Future<void> setVolcAppId(String value) =>
+      _prefs.setString(AppConstants.keyVolcAppId, value);
+
+  // MiniMax
+  String get minimaxApiKey => _prefs.getString(AppConstants.keyMinimaxApiKey) ?? '';
+  Future<void> setMinimaxApiKey(String value) =>
+      _prefs.setString(AppConstants.keyMinimaxApiKey, value);
+
+  String get minimaxGroupId => _prefs.getString(AppConstants.keyMinimaxGroupId) ?? '';
+  Future<void> setMinimaxGroupId(String value) =>
+      _prefs.setString(AppConstants.keyMinimaxGroupId, value);
+
+  /// Get the active API key for the current provider
+  String get activeApiKey {
+    switch (aiProvider) {
+      case AIProvider.gemini:
+        return apiKey;
+      case AIProvider.volcengine:
+        return volcApiKey;
+      case AIProvider.minimax:
+        return minimaxApiKey;
+    }
+  }
+
   // Voice
   String get voiceName =>
       _prefs.getString(AppConstants.keyVoiceName) ?? AppConstants.defaultVoice;

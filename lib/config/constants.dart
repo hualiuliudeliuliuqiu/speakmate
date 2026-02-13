@@ -1,3 +1,14 @@
+/// AI Provider / Engine selection
+enum AIProvider {
+  gemini('Gemini', 'Google Gemini (via proxy)'),
+  volcengine('VolcEngine', '火山引擎 / 豆包'),
+  minimax('MiniMax', 'MiniMax / 海螺AI');
+
+  final String displayName;
+  final String description;
+  const AIProvider(this.displayName, this.description);
+}
+
 class AppConstants {
   AppConstants._();
 
@@ -6,6 +17,17 @@ class AppConstants {
   static const String geminiTextModel = 'gemini-2.5-flash';
   static const String geminiWsBaseUrl =
       'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
+
+  // VolcEngine / Doubao API (placeholder URLs — update when keys are ready)
+  static const String volcTextModel = 'doubao-pro-256k';
+  static const String volcWsBaseUrl = 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel';
+  static const String volcTtsBaseUrl = 'https://openspeech.bytedance.com/api/v1/tts';
+  static const String volcTextBaseUrl = 'https://ark.cn-beijing.volces.com/api/v3';
+
+  // MiniMax API (placeholder URLs — update when keys are ready)
+  static const String minimaxTextModel = 'abab6.5s-chat';
+  static const String minimaxBaseUrl = 'https://api.minimax.chat/v1';
+  static const String minimaxRealtimeUrl = 'wss://api.minimax.chat/v1/realtime';
 
   // Audio config
   static const int inputSampleRate = 16000; // 16kHz for mic input
@@ -23,6 +45,13 @@ class AppConstants {
   static const String keyProxyPort = 'proxy_port';
   static const String keyProxyEnabled = 'proxy_enabled';
   static const String keyVoiceName = 'voice_name';
+
+  // Multi-engine storage keys
+  static const String keyAIProvider = 'ai_provider';
+  static const String keyVolcApiKey = 'volc_api_key';
+  static const String keyVolcAppId = 'volc_app_id';
+  static const String keyMinimaxApiKey = 'minimax_api_key';
+  static const String keyMinimaxGroupId = 'minimax_group_id';
 
   // Available voices
   static const List<String> availableVoices = [

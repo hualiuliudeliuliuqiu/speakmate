@@ -4,9 +4,11 @@ import 'package:provider/provider.dart';
 import '../config/theme.dart';
 import '../prompts/scenarios.dart';
 import '../services/storage_service.dart';
+import '../config/constants.dart';
 import 'chat_screen.dart';
 import 'standard_chat_screen.dart';
 import 'settings_screen.dart';
+import 'voice_call_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -19,16 +21,23 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _openChat(BuildContext context) {
     final storage = context.read<StorageService>();
-    if (storage.apiKey.isEmpty) {
+    if (storage.activeApiKey.isEmpty) {
       _showApiKeyDialog(context);
       return;
     }
 
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ChatScreen(scenario: defaultScenarios.first),
-      ),
-    );
+    final scenario = defaultScenarios.first;
+
+    // VolcEngine uses voice call UI (continuous bidirectional audio)
+    if (storage.aiProvider == AIProvider.volcengine) {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => VoiceCallScreen(scenario: scenario)),
+      );
+    } else {
+      Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => ChatScreen(scenario: scenario)),
+      );
+    }
   }
 
   void _showApiKeyDialog(BuildContext context) {
