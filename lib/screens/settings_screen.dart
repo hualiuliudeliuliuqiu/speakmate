@@ -246,30 +246,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   runSpacing: AppTheme.spacingSm,
                   children: AppConstants.availableVoices.map((voice) {
                     final isSelected = voice == _selectedVoice;
-                    return GestureDetector(
-                      onTap: () => setState(() => _selectedVoice = voice),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 150),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 10,
-                        ),
-                        decoration: BoxDecoration(
-                          color: isSelected ? AppTheme.primary : AppTheme.backgroundAlt,
-                          borderRadius: BorderRadius.circular(AppTheme.radiusFull),
-                          border: Border.all(
-                            color: isSelected
-                                ? AppTheme.primary
-                                : AppTheme.border,
-                            width: 1.5,
+                    return Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: () => setState(() => _selectedVoice = voice),
+                        borderRadius: BorderRadius.circular(AppTheme.radiusFull),
+                        splashColor: AppTheme.primary.withValues(alpha: 0.15),
+                        highlightColor: AppTheme.primary.withValues(alpha: 0.08),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 150),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 10,
                           ),
-                        ),
-                        child: Text(
-                          voice,
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                            color: isSelected ? Colors.white : AppTheme.textSecondary,
+                          decoration: BoxDecoration(
+                            color: isSelected ? AppTheme.primary : AppTheme.backgroundAlt,
+                            borderRadius: BorderRadius.circular(AppTheme.radiusFull),
+                            border: Border.all(
+                              color: isSelected
+                                  ? AppTheme.primary
+                                  : AppTheme.border,
+                              width: 1.5,
+                            ),
+                          ),
+                          child: Text(
+                            voice,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
+                              color: isSelected ? Colors.white : AppTheme.textSecondary,
+                            ),
                           ),
                         ),
                       ),

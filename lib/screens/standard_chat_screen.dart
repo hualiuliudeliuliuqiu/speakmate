@@ -540,32 +540,38 @@ class _StandardChatScreenState extends State<StandardChatScreen> {
 
   Widget _buildSendButton() {
     final hasText = _textController.text.trim().isNotEmpty;
-    return GestureDetector(
-      onTap: _sendTextMessage,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        width: 48,
-        height: 48,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: _isLoading
-              ? AppTheme.backgroundAlt
-              : (hasText ? const Color(0xFF6366F1) : AppTheme.backgroundAlt),
-        ),
-        child: _isLoading
-            ? const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: AppTheme.textMuted,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: _sendTextMessage,
+        borderRadius: BorderRadius.circular(24),
+        splashColor: const Color(0xFF6366F1).withValues(alpha: 0.2),
+        highlightColor: const Color(0xFF6366F1).withValues(alpha: 0.1),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          width: 48,
+          height: 48,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: _isLoading
+                ? AppTheme.backgroundAlt
+                : (hasText ? const Color(0xFF6366F1) : AppTheme.backgroundAlt),
+          ),
+          child: _isLoading
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppTheme.textMuted,
+                  ),
+                )
+              : Icon(
+                  Icons.send_rounded,
+                  color: hasText ? Colors.white : AppTheme.textMuted,
+                  size: 20,
                 ),
-              )
-            : Icon(
-                Icons.send_rounded,
-                color: hasText ? Colors.white : AppTheme.textMuted,
-                size: 20,
-              ),
+        ),
       ),
     );
   }

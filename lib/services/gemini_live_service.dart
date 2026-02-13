@@ -162,6 +162,7 @@ class GeminiLiveService {
           },
         },
         'output_audio_transcription': {},
+        'input_audio_transcription': {},
         'system_instruction': {
           'parts': [
             {'text': _systemPrompt},
@@ -192,6 +193,9 @@ class GeminiLiveService {
         return;
       }
 
+      // Debug: log all top-level keys (print works in release too)
+      print('SM_DEBUG WS keys: ${message.keys.toList()}');
+
       // Setup complete
       if (message.containsKey('setupComplete')) {
         debugPrint('Gemini setup complete');
@@ -206,6 +210,7 @@ class GeminiLiveService {
       if (message.containsKey('serverContent')) {
         final serverContent =
             message['serverContent'] as Map<String, dynamic>;
+        print('SM_DEBUG serverContent keys: ${serverContent.keys.toList()}');
 
         if (serverContent.containsKey('modelTurn')) {
           _isModelSpeaking = true;
@@ -244,6 +249,17 @@ class GeminiLiveService {
           }
         }
 
+        // Input audio transcription (user's speech-to-text)
+        if (serverContent.containsKey('inputTranscription')) {
+          final transcription =
+              serverContent['inputTranscription'] as Map<String, dynamic>;
+          final text = transcription['text'] as String?;
+          print('SM_DEBUG serverContent.inputTranscription: $text');
+          if (text != null && text.trim().isNotEmpty) {
+            _userTranscriptController.add(text);
+          }
+        }
+
         // Turn complete
         final turnComplete = serverContent['turnComplete'] as bool?;
         if (turnComplete == true) {
@@ -254,6 +270,17 @@ class GeminiLiveService {
         final interrupted = serverContent['interrupted'] as bool?;
         if (interrupted == true) {
           _isModelSpeaking = false;
+        }
+      }
+
+      // Top-level inputTranscription (some API versions send it here)
+      if (message.containsKey('inputTranscription')) {
+        final transcription =
+            message['inputTranscription'] as Map<String, dynamic>;
+        final text = transcription['text'] as String?;
+        print('SM_DEBUG top-level inputTranscription: $text');
+        if (text != null && text.trim().isNotEmpty) {
+          _userTranscriptController.add(text);
         }
       }
     } catch (e) {

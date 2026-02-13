@@ -8,6 +8,7 @@ class Message {
   String text;
   final DateTime timestamp;
   bool isStreaming;
+  bool isVoice;
 
   Message({
     String? id,
@@ -15,6 +16,7 @@ class Message {
     required this.text,
     DateTime? timestamp,
     this.isStreaming = false,
+    this.isVoice = false,
   })  : id = id ?? const Uuid().v4(),
         timestamp = timestamp ?? DateTime.now();
 
@@ -36,6 +38,7 @@ class Message {
         'role': role == MessageRole.user ? 'user' : 'assistant',
         'text': text,
         'timestamp': timestamp.toIso8601String(),
+        if (isVoice) 'isVoice': true,
       };
 
   factory Message.fromJson(Map<String, dynamic> json) => Message(
@@ -43,5 +46,6 @@ class Message {
         role: json['role'] == 'user' ? MessageRole.user : MessageRole.assistant,
         text: json['text'] as String,
         timestamp: DateTime.parse(json['timestamp'] as String),
+        isVoice: json['isVoice'] as bool? ?? false,
       );
 }

@@ -44,7 +44,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   StreamSubscription<GeminiConnectionState>? _stateSub;
   StreamSubscription<List<int>>? _audioSub;
   StreamSubscription<String>? _transcriptSub;
+  StreamSubscription<String>? _userTranscriptSub;
   StreamSubscription<double>? _audioLevelSub;
+  String _currentUserTranscript = '';
 
   @override
   void initState() {
@@ -92,6 +94,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _stateSub?.cancel();
     _audioSub?.cancel();
     _transcriptSub?.cancel();
+    _userTranscriptSub?.cancel();
 
     // Build context from previous conversation for continuity
     final contextSummary = _conversation.buildContextSummary();
@@ -144,6 +147,24 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           );
           _messages.add(msg);
           convService.addMessage(_conversation.id, msg);
+        }
+      });
+      _scrollToBottom();
+    });
+
+    _userTranscriptSub = _gemini.onUserTranscriptReceived.listen((text) {
+      if (!mounted) return;
+      final convService = context.read<ConversationService>();
+      setState(() {
+        _currentUserTranscript += text;
+        // Find the last user voice message and update its transcription
+        for (int i = _messages.length - 1; i >= 0; i--) {
+          if (_messages[i].role == MessageRole.user && _messages[i].isVoice) {
+            _messages[i].text = _currentUserTranscript;
+            convService.updateLastUserMessage(
+                _conversation.id, _messages[i].text);
+            break;
+          }
         }
       });
       _scrollToBottom();
@@ -220,6 +241,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<void> _startRecording() async {
     _textFocusNode.unfocus();
+    _currentUserTranscript = '';
 
     final status = await Permission.microphone.request();
     if (!status.isGranted) {
@@ -262,9 +284,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     try {
       await _audio.startRecording();
+      // Create voice message immediately so transcriptions can update it
+      final convService = context.read<ConversationService>();
+      final msg = Message(role: MessageRole.user, text: '', isVoice: true);
       setState(() {
         _isRecording = true;
+        _messages.add(msg);
       });
+      convService.addMessage(_conversation.id, msg);
+      _scrollToBottom();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -286,16 +314,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _audioLevel = 0.0;
     });
 
-    _gemini.sendTurnComplete();
-
-    if (!mounted) return;
-    final convService = context.read<ConversationService>();
-    final msg = Message(role: MessageRole.user, text: '🎤 Voice message');
-    setState(() {
-      _messages.add(msg);
-    });
-    convService.addMessage(_conversation.id, msg);
-    _scrollToBottom();
+    // Note: Do NOT send turn_complete for realtime_input audio.
+    // Gemini detects end-of-speech automatically via voice activity detection.
+    // Voice message was already added in _startRecording.
   }
 
   // ─── Text input ───
@@ -367,6 +388,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _stateSub?.cancel();
     _audioSub?.cancel();
     _transcriptSub?.cancel();
+    _userTranscriptSub?.cancel();
     _audioLevelSub?.cancel();
     _modelTurnTimer?.cancel();
     _gemini.dispose();
@@ -425,11 +447,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           // Recording visualizer
           if (_isRecording)
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: AppTheme.spacingXs),
+              padding: const EdgeInsets.symmetric(vertical: AppTheme.spacingSm),
               child: AudioVisualizer(
                 level: _audioLevel,
                 isActive: true,
-                size: 56,
+                size: 100,
                 color: AppTheme.danger,
               ),
             ),
@@ -704,31 +726,39 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Widget _buildMicButton() {
     final isConnected = _connectionState == GeminiConnectionState.connected;
 
-    return GestureDetector(
-      onTap: _toggleRecording,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        width: 48,
-        height: 48,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: _isRecording
-              ? AppTheme.danger
-              : (isConnected ? AppTheme.primary : AppTheme.backgroundAlt),
-          boxShadow: _isRecording
-              ? [
-                  BoxShadow(
-                    color: AppTheme.danger.withValues(alpha: 0.3),
-                    blurRadius: 12,
-                    offset: const Offset(0, 3),
-                  ),
-                ]
-              : null,
-        ),
-        child: Icon(
-          _isRecording ? Icons.stop_rounded : Icons.mic_rounded,
-          color: _isRecording || isConnected ? Colors.white : AppTheme.textMuted,
-          size: 24,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: _toggleRecording,
+        borderRadius: BorderRadius.circular(24),
+        splashColor: (_isRecording ? AppTheme.danger : AppTheme.primary)
+            .withValues(alpha: 0.2),
+        highlightColor: (_isRecording ? AppTheme.danger : AppTheme.primary)
+            .withValues(alpha: 0.1),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          width: 48,
+          height: 48,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: _isRecording
+                ? AppTheme.danger
+                : (isConnected ? AppTheme.primary : AppTheme.backgroundAlt),
+            boxShadow: _isRecording
+                ? [
+                    BoxShadow(
+                      color: AppTheme.danger.withValues(alpha: 0.3),
+                      blurRadius: 12,
+                      offset: const Offset(0, 3),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Icon(
+            _isRecording ? Icons.stop_rounded : Icons.mic_rounded,
+            color: _isRecording || isConnected ? Colors.white : AppTheme.textMuted,
+            size: 24,
+          ),
         ),
       ),
     );
@@ -737,20 +767,26 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Widget _buildSendButton() {
     final hasText = _textController.text.trim().isNotEmpty;
 
-    return GestureDetector(
-      onTap: _sendTextMessage,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        width: 48,
-        height: 48,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: hasText ? AppTheme.primary : AppTheme.backgroundAlt,
-        ),
-        child: Icon(
-          Icons.send_rounded,
-          color: hasText ? Colors.white : AppTheme.textMuted,
-          size: 20,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: _sendTextMessage,
+        borderRadius: BorderRadius.circular(24),
+        splashColor: AppTheme.primary.withValues(alpha: 0.2),
+        highlightColor: AppTheme.primary.withValues(alpha: 0.1),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          width: 48,
+          height: 48,
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: hasText ? AppTheme.primary : AppTheme.backgroundAlt,
+          ),
+          child: Icon(
+            Icons.send_rounded,
+            color: hasText ? Colors.white : AppTheme.textMuted,
+            size: 20,
+          ),
         ),
       ),
     );

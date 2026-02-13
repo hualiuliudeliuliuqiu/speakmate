@@ -148,14 +148,71 @@ class _TranscriptBubbleState extends State<TranscriptBubble>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  SelectableText(
-                    message.text,
-                    style: TextStyle(
-                      fontSize: 15,
-                      color: isUser ? Colors.white : AppTheme.textPrimary,
-                      height: 1.5,
+                  // Voice message indicator
+                  if (message.isVoice) ...[
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.mic_rounded,
+                          size: 14,
+                          color: isUser
+                              ? Colors.white.withValues(alpha: 0.7)
+                              : AppTheme.textMuted,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Voice',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isUser
+                                ? Colors.white.withValues(alpha: 0.6)
+                                : AppTheme.textMuted,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
+                    if (message.text.isNotEmpty)
+                      const SizedBox(height: 4),
+                  ],
+                  if (message.text.isNotEmpty)
+                    SelectableText(
+                      message.text,
+                      style: TextStyle(
+                        fontSize: 15,
+                        color: isUser ? Colors.white : AppTheme.textPrimary,
+                        height: 1.5,
+                      ),
+                    )
+                  else if (message.isVoice)
+                    // Show waiting indicator while transcription hasn't arrived yet
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SizedBox(
+                          width: 10,
+                          height: 10,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 1.5,
+                            color: isUser
+                                ? Colors.white.withValues(alpha: 0.5)
+                                : AppTheme.textMuted,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          'Transcribing...',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: isUser
+                                ? Colors.white.withValues(alpha: 0.5)
+                                : AppTheme.textMuted,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ],
+                    ),
                   if (message.isStreaming)
                     Padding(
                       padding: const EdgeInsets.only(top: 6),

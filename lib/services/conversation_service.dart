@@ -88,6 +88,21 @@ class ConversationService {
     }
   }
 
+  /// Update the last user message text (for voice transcription updates)
+  Future<void> updateLastUserMessage(String conversationId, String text) async {
+    final conv = _conversations.where((c) => c.id == conversationId).firstOrNull;
+    if (conv != null) {
+      for (int i = conv.messages.length - 1; i >= 0; i--) {
+        if (conv.messages[i].role == MessageRole.user) {
+          conv.messages[i].text = text;
+          conv.updatedAt = DateTime.now();
+          await _save();
+          return;
+        }
+      }
+    }
+  }
+
   /// Get conversation by ID
   Conversation? getById(String id) =>
       _conversations.where((c) => c.id == id).firstOrNull;

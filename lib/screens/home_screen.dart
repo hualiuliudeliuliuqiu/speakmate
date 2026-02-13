@@ -8,8 +8,14 @@ import 'chat_screen.dart';
 import 'standard_chat_screen.dart';
 import 'settings_screen.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
 
   void _openChat(BuildContext context) {
     final storage = context.read<StorageService>();
@@ -232,86 +238,151 @@ class HomeScreen extends StatelessWidget {
     required List<String> tags,
     required VoidCallback onTap,
   }) {
-    return GestureDetector(
+    return _PressableCard(
       onTap: onTap,
-      child: Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(AppTheme.spacingLg),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: gradient,
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+      gradient: gradient,
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: Colors.white.withValues(alpha: 0.8),
+                    height: 1.4,
+                  ),
+                ),
+                const SizedBox(height: AppTheme.spacingMd),
+                Row(
+                  children: tags
+                      .map((tag) => Container(
+                            margin: const EdgeInsets.only(right: 8),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.15),
+                              borderRadius:
+                                  BorderRadius.circular(AppTheme.radiusFull),
+                            ),
+                            child: Text(
+                              tag,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.white.withValues(alpha: 0.9),
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ))
+                      .toList(),
+                ),
+              ],
+            ),
           ),
-          borderRadius: BorderRadius.circular(AppTheme.radiusXl),
-          boxShadow: [
-            BoxShadow(
-              color: gradient[0].withValues(alpha: 0.3),
-              blurRadius: 20,
-              offset: const Offset(0, 8),
+          const SizedBox(width: AppTheme.spacingMd),
+          Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.2),
+              shape: BoxShape.circle,
             ),
-          ],
+            child: Icon(icon, color: Colors.white, size: 28),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Card with press-down scale + brightness animation
+class _PressableCard extends StatefulWidget {
+  final VoidCallback onTap;
+  final List<Color> gradient;
+  final Widget child;
+
+  const _PressableCard({
+    required this.onTap,
+    required this.gradient,
+    required this.child,
+  });
+
+  @override
+  State<_PressableCard> createState() => _PressableCardState();
+}
+
+class _PressableCardState extends State<_PressableCard>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<double> _scaleAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 120),
+    );
+    _scaleAnimation = Tween<double>(begin: 1.0, end: 0.96).animate(
+      CurvedAnimation(parent: _controller, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onTapDown(TapDownDetails _) => _controller.forward();
+  void _onTapUp(TapUpDetails _) {
+    _controller.reverse();
+    widget.onTap();
+  }
+  void _onTapCancel() => _controller.reverse();
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTapDown: _onTapDown,
+      onTapUp: _onTapUp,
+      onTapCancel: _onTapCancel,
+      child: AnimatedBuilder(
+        animation: _scaleAnimation,
+        builder: (context, child) => Transform.scale(
+          scale: _scaleAnimation.value,
+          child: child,
         ),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: Colors.white.withValues(alpha: 0.8),
-                      height: 1.4,
-                    ),
-                  ),
-                  const SizedBox(height: AppTheme.spacingMd),
-                  Row(
-                    children: tags
-                        .map((tag) => Container(
-                              margin: const EdgeInsets.only(right: 8),
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.15),
-                                borderRadius:
-                                    BorderRadius.circular(AppTheme.radiusFull),
-                              ),
-                              child: Text(
-                                tag,
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: Colors.white.withValues(alpha: 0.9),
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ))
-                        .toList(),
-                  ),
-                ],
-              ),
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(AppTheme.spacingLg),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: widget.gradient,
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
             ),
-            const SizedBox(width: AppTheme.spacingMd),
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.2),
-                shape: BoxShape.circle,
+            borderRadius: BorderRadius.circular(AppTheme.radiusXl),
+            boxShadow: [
+              BoxShadow(
+                color: widget.gradient[0].withValues(alpha: 0.3),
+                blurRadius: 20,
+                offset: const Offset(0, 8),
               ),
-              child: Icon(icon, color: Colors.white, size: 28),
-            ),
-          ],
+            ],
+          ),
+          child: widget.child,
         ),
       ),
     );

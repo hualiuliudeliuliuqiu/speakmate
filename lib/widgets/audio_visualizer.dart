@@ -62,22 +62,22 @@ class _AudioVisualizerState extends State<AudioVisualizer>
             : 1.0;
 
         return SizedBox(
-          width: widget.size * 1.4,
-          height: widget.size * 0.6,
+          width: widget.size * 1.2,
+          height: widget.size * 0.8,
           child: Stack(
             alignment: Alignment.center,
             children: [
               // Outer ring
               if (widget.isActive)
                 Transform.scale(
-                  scale: pulseScale * 1.2,
+                  scale: pulseScale * 1.15,
                   child: Container(
-                    width: widget.size * 0.5,
-                    height: widget.size * 0.5,
+                    width: widget.size * 0.65,
+                    height: widget.size * 0.65,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       border: Border.all(
-                        color: widget.color.withValues(alpha: 0.1),
+                        color: widget.color.withValues(alpha: 0.12),
                         width: 2,
                       ),
                     ),
@@ -87,20 +87,17 @@ class _AudioVisualizerState extends State<AudioVisualizer>
               Transform.scale(
                 scale: pulseScale,
                 child: Container(
-                  width: widget.size * 0.4,
-                  height: widget.size * 0.4,
+                  width: widget.size * 0.55,
+                  height: widget.size * 0.55,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: widget.color.withValues(alpha: widget.isActive ? 0.15 : 0.05),
                   ),
                   child: Center(
-                    child: Text(
-                      _isRecordingLabel(),
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: widget.color,
-                      ),
+                    child: Icon(
+                      Icons.mic_rounded,
+                      size: widget.size * 0.25,
+                      color: widget.color,
                     ),
                   ),
                 ),
@@ -110,11 +107,6 @@ class _AudioVisualizerState extends State<AudioVisualizer>
         );
       },
     );
-  }
-
-  String _isRecordingLabel() {
-    if (!widget.isActive) return '';
-    return 'REC';
   }
 }
 
