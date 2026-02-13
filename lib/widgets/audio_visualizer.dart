@@ -139,6 +139,12 @@ class _AISpeakingIndicatorState extends State<AISpeakingIndicator>
         duration: Duration(milliseconds: 300 + _random.nextInt(400)),
       );
     });
+    // Start animation immediately if already speaking
+    if (widget.isSpeaking) {
+      for (final c in _controllers) {
+        c.repeat(reverse: true);
+      }
+    }
   }
 
   @override

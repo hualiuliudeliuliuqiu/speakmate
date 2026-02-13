@@ -50,7 +50,7 @@ class AudioService {
       _audioStream.init(
         sampleRate: AppConstants.outputSampleRate, // 24000
         channels: AppConstants.numChannels, // 1
-        bufferMilliSec: 5000, // 5 second buffer
+        bufferMilliSec: 30000, // 30 second buffer for large TTS responses
         waitingBufferMilliSec: 50, // start playing after 50ms of data
       );
       _audioStream.resume();
@@ -104,7 +104,8 @@ class AudioService {
     _audioLevelController.add(0.0);
   }
 
-  /// Add audio data — push to real-time stream AND collect for saving
+  /// Add audio data — push to real-time stream AND collect for saving.
+  /// Large data is split into chunks to avoid overflowing mp_audio_stream's buffer.
   void addPlaybackData(Uint8List pcmData) {
     // Collect for saving later
     _turnPcmBuffer.addAll(pcmData);
@@ -112,7 +113,13 @@ class AudioService {
     // Convert Int16 PCM to Float32 and push to audio stream for immediate playback
     _ensureStreamInit();
     final float32 = _pcm16ToFloat32(pcmData);
-    _audioStream.push(float32);
+
+    // Push in chunks of ~1 second (24000 samples) to avoid buffer overflow
+    const chunkSize = 24000;
+    for (int offset = 0; offset < float32.length; offset += chunkSize) {
+      final end = (offset + chunkSize).clamp(0, float32.length);
+      _audioStream.push(Float32List.sublistView(float32, offset, end));
+    }
     _isPlaying = true;
   }
 

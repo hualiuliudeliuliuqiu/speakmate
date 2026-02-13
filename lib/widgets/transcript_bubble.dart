@@ -113,9 +113,7 @@ class _TranscriptBubbleState extends State<TranscriptBubble>
         !message.isStreaming &&
         widget.ttsService != null;
     final canReplay = hasNativeAudio || hasTts;
-    final replayLabel = (hasNativeAudio || 
-        (widget.ttsService != null && widget.ttsService!.hasAudio(message.id)))
-        ? 'Replay' : 'Play';
+    final replayLabel = 'Replay';
     final storage = context.read<StorageService>();
 
     return Padding(

@@ -38,6 +38,7 @@ class _StandardChatScreenState extends State<StandardChatScreen> {
   final List<Message> _messages = [];
   bool _isLoading = false;
   bool _isRecording = false;
+  bool _isSpeaking = false;
   double _audioLevel = 0.0;
   String? _errorMessage;
   bool _isReady = false;
@@ -45,6 +46,7 @@ class _StandardChatScreenState extends State<StandardChatScreen> {
   // Collect PCM data during recording
   final List<int> _recordingBuffer = [];
   StreamSubscription<double>? _audioLevelSub;
+  StreamSubscription<bool>? _ttsSpeakingSub;
 
   @override
   void initState() {
@@ -77,7 +79,8 @@ class _StandardChatScreenState extends State<StandardChatScreen> {
           scenarioContext.isNotEmpty ? scenarioContext : null,
     );
 
-    // Initialize Gemini TTS
+    // Initialize Gemini TTS with shared AudioService for streaming playback
+    _tts.setAudioService(_audio);
     _tts.configure(
       apiKey: apiKey,
       proxyHost: storage.proxyHost,
@@ -85,6 +88,11 @@ class _StandardChatScreenState extends State<StandardChatScreen> {
       proxyEnabled: storage.proxyEnabled,
       voiceName: storage.voiceName,
     );
+
+    // Listen to TTS playing state
+    _ttsSpeakingSub = _tts.onPlayingChanged.listen((playing) {
+      if (mounted) setState(() => _isSpeaking = playing);
+    });
 
     // Load conversation
     _loadConversation();
@@ -359,6 +367,7 @@ class _StandardChatScreenState extends State<StandardChatScreen> {
     _gemini.dispose();
     _audio.dispose();
     _audioLevelSub?.cancel();
+    _ttsSpeakingSub?.cancel();
     _scrollController.dispose();
     _textController.dispose();
     _textFocusNode.dispose();
@@ -403,6 +412,16 @@ class _StandardChatScreenState extends State<StandardChatScreen> {
                     },
                   ),
           ),
+
+          // AI speaking indicator
+          if (_isSpeaking)
+            Container(
+              padding: const EdgeInsets.symmetric(
+                vertical: AppTheme.spacingSm,
+                horizontal: AppTheme.spacingMd,
+              ),
+              child: AISpeakingIndicator(isSpeaking: _isSpeaking),
+            ),
 
           // Recording visualizer
           if (_isRecording)
