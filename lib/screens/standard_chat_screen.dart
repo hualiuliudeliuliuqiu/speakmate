@@ -64,8 +64,14 @@ class _StandardChatScreenState extends State<StandardChatScreen> {
           scenarioContext.isNotEmpty ? scenarioContext : null,
     );
 
-    // Initialize TTS
-    _tts.init();
+    // Initialize Gemini TTS
+    _tts.configure(
+      apiKey: apiKey,
+      proxyHost: storage.proxyHost,
+      proxyPort: storage.proxyPort,
+      proxyEnabled: storage.proxyEnabled,
+      voiceName: storage.voiceName,
+    );
 
     // Load conversation
     _loadConversation();
@@ -88,6 +94,14 @@ class _StandardChatScreenState extends State<StandardChatScreen> {
       _messages.addAll(_conversation.messages);
       // Restore history in the text service so API has context
       _gemini.restoreHistory(_conversation.messages);
+      // Preload TTS audio cache
+      final assistantIds = _messages
+          .where((m) => m.role == MessageRole.assistant)
+          .map((m) => m.id)
+          .toList();
+      _tts.preloadAudioCache(assistantIds).then((_) {
+        if (mounted) setState(() {});
+      });
       // Scroll to bottom after frame
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
     }
@@ -129,7 +143,7 @@ class _StandardChatScreenState extends State<StandardChatScreen> {
     await convService.addMessage(_conversation.id, userMsg);
 
     try {
-      // Call Gemini API
+      // Call Gemini text API
       final responseText = await _gemini.sendMessage(text);
 
       if (!mounted) return;
@@ -146,8 +160,8 @@ class _StandardChatScreenState extends State<StandardChatScreen> {
       // Persist assistant message
       await convService.addMessage(_conversation.id, assistantMsg);
 
-      // Speak the response
-      _tts.speak(responseText);
+      // Speak via Live API WebSocket — real-time streaming like Native Audio
+      _tts.speak(responseText, messageId: assistantMsg.id);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -155,13 +169,6 @@ class _StandardChatScreenState extends State<StandardChatScreen> {
         _errorMessage = 'Failed to get response: $e';
       });
     }
-  }
-
-  // ─── TTS replay ───
-
-  void _replayTts(String text) {
-    _tts.stop();
-    _tts.speak(text);
   }
 
   // ─── New chat ───
@@ -235,8 +242,8 @@ class _StandardChatScreenState extends State<StandardChatScreen> {
                       final msg = _messages[index];
                       return TranscriptBubble(
                         message: msg,
-                        onTtsReplay: msg.role == MessageRole.assistant
-                            ? () => _replayTts(msg.text)
+                        ttsService: msg.role == MessageRole.assistant
+                            ? _tts
                             : null,
                       );
                     },

@@ -8,18 +8,19 @@ import '../config/theme.dart';
 import '../models/message.dart';
 import '../services/audio_service.dart';
 import '../services/storage_service.dart';
+import '../services/tts_service.dart';
 
 class TranscriptBubble extends StatefulWidget {
   final Message message;
   final AudioService? audioService;
-  /// For standard mode: callback to replay via TTS
-  final VoidCallback? onTtsReplay;
+  /// For standard mode: TTS service for replay
+  final TtsService? ttsService;
 
   const TranscriptBubble({
     super.key,
     required this.message,
     this.audioService,
-    this.onTtsReplay,
+    this.ttsService,
   });
 
   @override
@@ -32,6 +33,7 @@ class _TranscriptBubbleState extends State<TranscriptBubble>
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
   StreamSubscription<bool>? _replaySub;
+  StreamSubscription<bool>? _ttsSub;
 
   @override
   void initState() {
@@ -48,7 +50,18 @@ class _TranscriptBubbleState extends State<TranscriptBubble>
     if (widget.audioService != null) {
       _replaySub = widget.audioService!.onReplayStateChanged.listen((playing) {
         if (!mounted) return;
-        // Only react if we initiated the replay
+        if (_isReplaying && !playing) {
+          _pulseController.stop();
+          _pulseController.reset();
+          setState(() => _isReplaying = false);
+        }
+      });
+    }
+
+    // Listen to TTS state changes
+    if (widget.ttsService != null) {
+      _ttsSub = widget.ttsService!.onPlayingChanged.listen((playing) {
+        if (!mounted) return;
         if (_isReplaying && !playing) {
           _pulseController.stop();
           _pulseController.reset();
@@ -61,6 +74,7 @@ class _TranscriptBubbleState extends State<TranscriptBubble>
   @override
   void dispose() {
     _replaySub?.cancel();
+    _ttsSub?.cancel();
     _pulseController.dispose();
     super.dispose();
   }
@@ -68,13 +82,21 @@ class _TranscriptBubbleState extends State<TranscriptBubble>
   Future<void> _onReplay() async {
     if (_isReplaying) return;
 
-    if (widget.audioService != null) {
+    if (widget.audioService != null &&
+        widget.audioService!.hasAudio(widget.message.id)) {
       setState(() => _isReplaying = true);
       _pulseController.repeat(reverse: true);
-      // Don't await — the stream listener handles completion
       widget.audioService!.replayAudio(widget.message.id);
-    } else if (widget.onTtsReplay != null) {
-      widget.onTtsReplay!();
+    } else if (widget.ttsService != null) {
+      setState(() => _isReplaying = true);
+      _pulseController.repeat(reverse: true);
+      if (widget.ttsService!.hasAudio(widget.message.id)) {
+        // Replay from saved file
+        widget.ttsService!.replay(widget.message.id);
+      } else {
+        // Generate and play (first time or no saved audio)
+        widget.ttsService!.speak(widget.message.text, messageId: widget.message.id);
+      }
     }
   }
 
@@ -87,10 +109,13 @@ class _TranscriptBubbleState extends State<TranscriptBubble>
         !message.isStreaming &&
         widget.audioService != null &&
         widget.audioService!.hasAudio(message.id);
-    final hasTtsReplay = isAssistant &&
+    final hasTts = isAssistant &&
         !message.isStreaming &&
-        widget.onTtsReplay != null;
-    final canReplay = hasNativeAudio || hasTtsReplay;
+        widget.ttsService != null;
+    final canReplay = hasNativeAudio || hasTts;
+    final replayLabel = (hasNativeAudio || 
+        (widget.ttsService != null && widget.ttsService!.hasAudio(message.id)))
+        ? 'Replay' : 'Play';
     final storage = context.read<StorageService>();
 
     return Padding(
@@ -187,7 +212,7 @@ class _TranscriptBubbleState extends State<TranscriptBubble>
                                   ),
                             const SizedBox(width: 4),
                             Text(
-                              _isReplaying ? 'Playing...' : 'Replay',
+                              _isReplaying ? 'Playing...' : replayLabel,
                               style: TextStyle(
                                 fontSize: 12,
                                 color: _isReplaying
